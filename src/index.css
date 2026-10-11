@@ -1,0 +1,267 @@
+@import '@fontsource-variable/montserrat';
+@import '@fontsource-variable/playfair-display/wght-italic.css';
+@import 'tailwindcss';
+
+/* =========================================================
+   Design tokens
+   Palette and type come from the Saathi First brand deck.
+   Scale, radii and rhythm follow the reference layout system.
+========================================================= */
+
+@theme {
+  --color-burgundy: #6b1e2e;
+  --color-blush: #fdeeee;
+  --color-rosewood: #b9545c;
+  --color-gold: #c9a26b;
+  --color-wine: #3a1119;
+  --color-cream: #fbf6f2;
+  --color-ink: #3a1119;
+  --color-ink-muted: #6f4a51;
+
+  --font-sans: 'Montserrat Variable', 'Montserrat', ui-sans-serif, system-ui, sans-serif;
+  --font-accent: 'Playfair Display Variable', 'Playfair Display', Georgia, serif;
+
+  --radius-card: 2rem;
+  --radius-pill: 100px;
+
+  --shadow-card: 0 32px 64px -12px rgb(58 17 25 / 0.18);
+
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --breakpoint-nav: 62rem;
+
+  --animate-marquee: marquee 38s linear infinite;
+  --animate-rise: rise 0.9s var(--ease-out-soft) both;
+
+  @keyframes marquee {
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(24px);
+    }
+  }
+}
+
+:root {
+  --gutter: 5%;
+  --container: 80rem;
+  --section-y: 4rem;
+  --grad-primary: linear-gradient(135deg, #c9a26b 20%, #f3dcc0);
+  --grad-alternate: linear-gradient(90deg, #fbdcd6, #fffaf8);
+}
+
+@media (min-width: 62rem) {
+  :root {
+    --section-y: 7.8rem;
+  }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 7rem;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    color: var(--color-ink);
+    background: var(--color-blush);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: clip;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-gold);
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+
+  ::selection {
+    background: var(--color-burgundy);
+    color: var(--color-blush);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* =========================================================
+   Layout primitives
+========================================================= */
+
+@utility page-padding {
+  padding-inline: var(--gutter);
+}
+
+@utility container-large {
+  width: 100%;
+  max-width: var(--container);
+  margin-inline: auto;
+}
+
+@utility section-y {
+  padding-block: var(--section-y);
+}
+
+/* =========================================================
+   Type scale (mobile first, steps up at the nav breakpoint)
+========================================================= */
+
+@utility text-display {
+  font-size: clamp(2rem, 1.1rem + 3.9vw, 4rem);
+  font-weight: 300;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+@utility text-huge {
+  font-size: clamp(2.75rem, 1.2rem + 6.2vw, 6rem);
+  font-weight: 200;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+@utility text-heading {
+  font-size: clamp(2rem, 1.45rem + 2.2vw, 3rem);
+  font-weight: 250;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+
+@utility text-subheading {
+  font-size: clamp(1.5rem, 1.3rem + 0.9vw, 2rem);
+  font-weight: 300;
+  line-height: 1.3;
+  letter-spacing: -0.012em;
+}
+
+@utility text-card-title {
+  font-size: clamp(1.375rem, 1.1rem + 1.1vw, 2rem);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+
+@utility text-xlarge {
+  font-size: clamp(1.25rem, 1.15rem + 0.4vw, 1.5rem);
+  line-height: 1.5;
+}
+
+@utility text-large {
+  font-size: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem);
+  line-height: 1.5;
+}
+
+@utility text-eyebrow {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+@utility accent {
+  font-family: var(--font-accent);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+}
+
+/* =========================================================
+   Shared components
+========================================================= */
+
+@utility divider-fade {
+  height: 1px;
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    currentColor 25%,
+    currentColor 75%,
+    transparent
+  );
+}
+
+@utility divider-left {
+  height: 1px;
+  background-image: linear-gradient(90deg, currentColor, transparent);
+}
+
+@utility page-wash {
+  background-image: radial-gradient(
+    50% 50% at 50% 50%,
+    #fffaf8 26.92%,
+    #fdeeee 54.33%,
+    #f7e1d6 100%
+  );
+}
+
+@utility field-dark {
+  width: 100%;
+  min-height: 4.25rem;
+  padding: 1.25rem 2rem;
+  border-radius: 2rem;
+  border: 1px solid rgb(253 238 238 / 0.14);
+  background-color: rgb(253 238 238 / 0.12);
+  color: var(--color-blush);
+  font-size: 1rem;
+  line-height: 1.6;
+  transition:
+    border-color 0.2s,
+    background-color 0.2s;
+  &::placeholder {
+    color: rgb(253 238 238 / 0.72);
+  }
+  &:hover {
+    background-color: rgb(253 238 238 / 0.16);
+  }
+  &:focus-visible {
+    outline: none;
+    border-color: var(--color-gold);
+    background-color: rgb(253 238 238 / 0.18);
+  }
+  &[aria-invalid='true'] {
+    border-color: #f4a6a0;
+  }
+}
+
+@utility field-light {
+  width: 100%;
+  min-height: 3.75rem;
+  padding: 1rem 1.5rem;
+  border-radius: 1.75rem;
+  border: 1px solid rgb(107 30 46 / 0.22);
+  background-color: rgb(255 255 255 / 0.75);
+  color: var(--color-ink);
+  font-size: 1rem;
+  line-height: 1.6;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+  &::placeholder {
+    color: rgb(58 17 25 / 0.5);
+  }
+  &:focus-visible {
+    outline: none;
+    border-color: var(--color-burgundy);
+    box-shadow: 0 0 0 3px rgb(107 30 46 / 0.12);
+  }
+  &[aria-invalid='true'] {
+    border-color: #b3261e;
+  }
+}
