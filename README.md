@@ -22,12 +22,26 @@ npm run lint
 | `src/assets/logo/` | Logo SVGs extracted from the brand deck's vector artwork |
 | `public/images/` | Optimised WebP photos (generated from the supplied originals) |
 
+## Sign-in, bookings and admin (Firebase)
+
+Contact, Become a Saathi and `/admin` require sign-in (phone OTP or email and password).
+Submissions are saved to Firestore: `bookings` and `applications`.
+
+1. Copy `.env.example` to `.env.local` and paste the web app config from the Firebase console.
+2. Firebase console > Authentication > Sign-in method: enable **Phone** and **Email/Password**.
+   Under Settings > Authorised domains, add the live domain.
+3. Firebase console > Firestore Database: create the database, then paste `firestore.rules` into Rules.
+4. To make someone an admin: sign in on the site, open `/admin`, copy the user ID shown, and
+   create a document with that ID in an `admins` collection (any field, e.g. `role: "owner"`).
+
+Aadhaar numbers are stored masked (last four digits only); other ID numbers are stored in full.
+
 ## Before launch
 
-- **Forms have no backend.** Every form calls `openEnquiryEmail` in `src/lib/enquiry.ts`,
-  which opens a pre-filled email to `support@saathifirst.in`. Replace that one function
-  when a form endpoint or CRM is available.
-- **Policy pages are placeholders** (`src/pages/Policy.tsx`). Add the approved legal text.
+- **The footer enquiry form still uses email.** It calls `openEnquiryEmail` in
+  `src/lib/enquiry.ts`; the Contact and Become a Saathi forms save to Firestore.
+- **Policy pages are placeholders** (`src/pages/Policy.tsx`). Add the approved legal text,
+  including how ID details and location are used.
 - **Social links are omitted** because no profile URLs were supplied.
 - **Hosting needs an SPA fallback**: serve `index.html` for unknown paths so deep links
   such as `/plans` work on refresh.

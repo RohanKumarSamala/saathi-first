@@ -1,0 +1,45 @@
+rules_version = '2';
+
+// Paste into Firebase console > Firestore Database > Rules (or deploy with the Firebase CLI).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // An admin is any user with a document at admins/{their uid}.
+    // Create those documents by hand in the console; nobody can write them from the site.
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function ownsNew() {
+      return signedIn() && request.resource.data.uid == request.auth.uid;
+    }
+
+    match /admins/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    // Customer requests from the Contact page.
+    match /bookings/{id} {
+      allow create: if ownsNew() && request.resource.data.status == 'new';
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+      allow delete: if false;
+    }
+
+    // Applications from the Become a Saathi page.
+    match /applications/{id} {
+      allow create: if ownsNew() && request.resource.data.status == 'pending';
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+      allow delete: if false;
+    }
+  }
+}

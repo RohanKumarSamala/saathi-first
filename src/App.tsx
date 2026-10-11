@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { lazy, Suspense, useEffect, useRef } from 'react'
 import { BrowserRouter, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { AuthProvider } from './auth/AuthProvider'
 import { Footer } from './components/Footer'
 import { Header } from './components/Header'
 import BecomeSaathi from './pages/BecomeSaathi'
@@ -9,6 +10,9 @@ import NotFound from './pages/NotFound'
 import Plans from './pages/Plans'
 import Policy from './pages/Policy'
 import Services from './pages/Services'
+
+// Only admins need this code, so it is loaded on demand.
+const Admin = lazy(() => import('./pages/Admin'))
 
 /** Scrolls to the hash target on in-page links, otherwise to the top on navigation. */
 function useScrollRestoration() {
@@ -44,7 +48,7 @@ function Layout() {
       <main id="main" className="[overflow-x:clip]">
         <Outlet />
       </main>
-      <Footer showEnquiry={pathname !== '/contact'} />
+      <Footer showEnquiry={pathname !== '/contact' && pathname !== '/admin'} />
     </>
   )
 }
@@ -52,7 +56,8 @@ function Layout() {
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
+      <AuthProvider>
+        <Routes>
         <Route element={<Layout />}>
           <Route index element={<Home />} />
           <Route path="services" element={<Services />} />
@@ -60,9 +65,18 @@ export default function App() {
           <Route path="become-a-saathi" element={<BecomeSaathi />} />
           <Route path="contact" element={<Contact />} />
           <Route path="policies/:slug" element={<Policy />} />
+          <Route
+            path="admin"
+            element={
+              <Suspense fallback={null}>
+                <Admin />
+              </Suspense>
+            }
+          />
           <Route path="*" element={<NotFound />} />
         </Route>
-      </Routes>
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   )
 }

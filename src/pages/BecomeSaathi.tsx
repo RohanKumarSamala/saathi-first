@@ -1,53 +1,252 @@
+import { ChevronDown, CircleCheck } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
+import { AuthGate } from '../auth/AuthGate'
+import { useAuth } from '../auth/context'
 import { Button } from '../components/Button'
 import { Field } from '../components/Field'
 import { PageHero } from '../components/PageHero'
-import { isValidIndianMobile, openEnquiryEmail } from '../lib/enquiry'
+import { createApplication } from '../lib/db'
+import { isValidIndianMobile } from '../lib/enquiry'
 import { fieldProps } from '../lib/fieldProps'
+import { idTypes, isValidId, maskIdNumber } from '../lib/identity'
 
-type FieldName = 'name' | 'mobile' | 'age' | 'area'
+type FieldName = 'name' | 'mobile' | 'age' | 'area' | 'citizen' | 'idNumber' | 'consent'
 type Errors = Partial<Record<FieldName, string>>
 
 const nextSteps = [
   { title: 'Apply', body: 'Share a few details about yourself and the areas of Hyderabad you can cover.' },
-  { title: 'Verification', body: 'We carry out identity and background verification.' },
+  { title: 'Verification', body: 'We check your government ID in person and carry out a background check.' },
   { title: 'Training', body: 'You complete training before any customer assignment.' },
 ]
 
-export default function BecomeSaathi() {
-  const [errors, setErrors] = useState<Errors>({})
-  const [sent, setSent] = useState(false)
+const checkClass = 'mt-1 size-5 shrink-0 accent-burgundy'
 
-  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+function ApplicationForm() {
+  const { user } = useAuth()
+  const [idType, setIdType] = useState<string>(idTypes[0].id)
+  const [errors, setErrors] = useState<Errors>({})
+  const [state, setState] = useState<'idle' | 'saving' | 'sent' | 'failed'>('idle')
+  const idHint = idTypes.find((item) => item.id === idType)?.hint
+
+  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (!user) return
     const data = new FormData(event.currentTarget)
     const value = (key: string) => String(data.get(key) ?? '').trim()
+    const age = Number(value('age'))
 
     const next: Errors = {}
     if (!value('name')) next.name = 'Please enter your full name.'
     if (!isValidIndianMobile(value('mobile'))) next.mobile = 'Please enter a valid 10-digit mobile number.'
-    const age = Number(value('age'))
     if (!Number.isInteger(age) || age < 18 || age > 80) next.age = 'You must be 18 or older to apply.'
     if (!value('area')) next.area = 'Please enter your locality.'
+    if (!data.get('citizen')) next.citizen = 'Saathis must be Indian citizens. Please confirm to continue.'
+    if (!isValidId(idType, value('idNumber'))) next.idNumber = `Please enter a valid number (${idHint}).`
+    if (!data.get('consent')) next.consent = 'We need your consent to verify your identity and background.'
     setErrors(next)
-
     if (Object.keys(next).length > 0) {
-      setSent(false)
       document.getElementById(`saathi-${Object.keys(next)[0]}`)?.focus()
       return
     }
 
-    openEnquiryEmail('Saathi application', {
-      'Full name': value('name'),
-      Mobile: value('mobile'),
-      Age: value('age'),
-      Area: value('area'),
-      Languages: value('languages'),
-      'Experience / skills': value('experience'),
-    })
-    setSent(true)
+    setState('saving')
+    try {
+      await createApplication({
+        uid: user.uid,
+        name: value('name'),
+        mobile: value('mobile'),
+        age,
+        area: value('area'),
+        languages: value('languages'),
+        experience: value('experience'),
+        indianCitizen: true,
+        idType,
+        idNumber: maskIdNumber(idType, value('idNumber')),
+        consent: true,
+      })
+      setState('sent')
+    } catch {
+      setState('failed')
+    }
   }
 
+  if (state === 'sent') {
+    return (
+      <div role="status" className="rounded-card bg-white/85 p-8 shadow-card nav:p-12">
+        <CircleCheck aria-hidden className="size-10 text-rosewood" strokeWidth={1.5} />
+        <h2 className="text-subheading mt-4 font-normal">Application received.</h2>
+        <p className="text-large mt-2 text-ink-muted">
+          Thank you for applying. Our team will contact you about identity verification and
+          training. Please keep your original ID ready.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <form
+      noValidate
+      onSubmit={onSubmit}
+      aria-labelledby="application-heading"
+      className="grid gap-5 rounded-card bg-white/85 p-7 shadow-card nav:p-12"
+    >
+      <h2 id="application-heading" className="text-subheading font-normal">
+        Your application
+      </h2>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Field id="saathi-name" label="Full name (as on your ID)" error={errors.name}>
+          <input
+            {...fieldProps('saathi-name', errors.name)}
+            name="name"
+            type="text"
+            autoComplete="name"
+            placeholder="Full name"
+            className="field-light"
+          />
+        </Field>
+        <Field id="saathi-mobile" label="Mobile" error={errors.mobile}>
+          <input
+            {...fieldProps('saathi-mobile', errors.mobile)}
+            name="mobile"
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
+            defaultValue={user?.phoneNumber ?? ''}
+            placeholder="10-digit mobile"
+            className="field-light"
+          />
+        </Field>
+        <Field id="saathi-age" label="Age" error={errors.age}>
+          <input
+            {...fieldProps('saathi-age', errors.age)}
+            name="age"
+            type="number"
+            inputMode="numeric"
+            min={18}
+            placeholder="Age"
+            className="field-light"
+          />
+        </Field>
+        <Field id="saathi-area" label="Area" error={errors.area}>
+          <input
+            {...fieldProps('saathi-area', errors.area)}
+            name="area"
+            type="text"
+            placeholder="Hyderabad locality"
+            className="field-light"
+          />
+        </Field>
+      </div>
+      <Field id="saathi-languages" label="Languages">
+        <input
+          id="saathi-languages"
+          name="languages"
+          type="text"
+          placeholder="Telugu, Hindi, English"
+          className="field-light"
+        />
+      </Field>
+      <Field id="saathi-experience" label="Experience / skills">
+        <textarea
+          id="saathi-experience"
+          name="experience"
+          rows={4}
+          placeholder="Customer service, hospital experience, driving, etc."
+          className="field-light resize-y"
+        />
+      </Field>
+
+      <fieldset className="grid gap-5 rounded-3xl bg-burgundy/[0.06] p-5 nav:p-7">
+        <legend className="text-eyebrow float-left mb-1 w-full font-semibold text-rosewood">
+          Identity check
+        </legend>
+        <p className="text-sm text-ink-muted">
+          Families trust a Saathi with the people they love, so every applicant is verified
+          before their first assignment.
+        </p>
+
+        <div>
+          <label className="flex gap-3 font-medium">
+            <input
+              id="saathi-citizen"
+              name="citizen"
+              type="checkbox"
+              aria-invalid={Boolean(errors.citizen)}
+              className={checkClass}
+            />
+            I am an Indian citizen and live in India.
+          </label>
+          {errors.citizen && <p className="mt-2 text-sm text-[#b3261e]">{errors.citizen}</p>}
+        </div>
+
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field id="saathi-idType" label="Government ID">
+            <div className="relative">
+              <select
+                id="saathi-idType"
+                value={idType}
+                onChange={(event) => setIdType(event.target.value)}
+                className="field-light cursor-pointer appearance-none pr-12"
+              >
+                {idTypes.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                aria-hidden
+                className="pointer-events-none absolute right-5 top-1/2 size-5 -translate-y-1/2"
+              />
+            </div>
+          </Field>
+          <Field id="saathi-idNumber" label="ID number" error={errors.idNumber}>
+            <input
+              {...fieldProps('saathi-idNumber', errors.idNumber)}
+              name="idNumber"
+              type="text"
+              autoComplete="off"
+              placeholder={idHint}
+              className="field-light uppercase placeholder:normal-case"
+            />
+          </Field>
+        </div>
+        {idType === 'aadhaar' && (
+          <p className="text-sm text-ink-muted">
+            For your privacy we keep only the last four digits of your Aadhaar number. We will
+            check the card itself when we meet you.
+          </p>
+        )}
+
+        <div>
+          <label className="flex gap-3 font-medium">
+            <input
+              id="saathi-consent"
+              name="consent"
+              type="checkbox"
+              aria-invalid={Boolean(errors.consent)}
+              className={checkClass}
+            />
+            I confirm these details are true and I consent to Saathi First verifying my identity
+            and background.
+          </label>
+          {errors.consent && <p className="mt-2 text-sm text-[#b3261e]">{errors.consent}</p>}
+        </div>
+      </fieldset>
+
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-3 pt-2">
+        <Button type="submit" variant="solid" disabled={state === 'saving'}>
+          {state === 'saving' ? 'Submitting…' : 'Submit application'}
+        </Button>
+        <p role="status" className="max-w-xs text-sm text-[#b3261e]">
+          {state === 'failed' && 'We could not submit your application. Please try again.'}
+        </p>
+      </div>
+    </form>
+  )
+}
+
+export default function BecomeSaathi() {
   return (
     <>
       <PageHero
@@ -82,87 +281,9 @@ export default function BecomeSaathi() {
             </ol>
           </section>
 
-          <form
-            noValidate
-            onSubmit={onSubmit}
-            aria-labelledby="application-heading"
-            className="grid gap-5 rounded-card bg-white/85 p-7 shadow-card nav:p-12"
-          >
-            <h2 id="application-heading" className="text-subheading font-normal">
-              Your application
-            </h2>
-            <div className="grid gap-5 sm:grid-cols-2">
-              <Field id="saathi-name" label="Full name" error={errors.name}>
-                <input
-                  {...fieldProps('saathi-name', errors.name)}
-                  name="name"
-                  type="text"
-                  autoComplete="name"
-                  placeholder="Full name"
-                  className="field-light"
-                />
-              </Field>
-              <Field id="saathi-mobile" label="Mobile" error={errors.mobile}>
-                <input
-                  {...fieldProps('saathi-mobile', errors.mobile)}
-                  name="mobile"
-                  type="tel"
-                  inputMode="tel"
-                  autoComplete="tel"
-                  placeholder="10-digit mobile"
-                  className="field-light"
-                />
-              </Field>
-              <Field id="saathi-age" label="Age" error={errors.age}>
-                <input
-                  {...fieldProps('saathi-age', errors.age)}
-                  name="age"
-                  type="number"
-                  inputMode="numeric"
-                  min={18}
-                  placeholder="Age"
-                  className="field-light"
-                />
-              </Field>
-              <Field id="saathi-area" label="Area" error={errors.area}>
-                <input
-                  {...fieldProps('saathi-area', errors.area)}
-                  name="area"
-                  type="text"
-                  placeholder="Hyderabad locality"
-                  className="field-light"
-                />
-              </Field>
-            </div>
-            <Field id="saathi-languages" label="Languages">
-              <input
-                id="saathi-languages"
-                name="languages"
-                type="text"
-                placeholder="Telugu, Hindi, English"
-                className="field-light"
-              />
-            </Field>
-            <Field id="saathi-experience" label="Experience / skills">
-              <textarea
-                id="saathi-experience"
-                name="experience"
-                rows={4}
-                placeholder="Customer service, hospital experience, driving, etc."
-                className="field-light resize-y"
-              />
-            </Field>
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-3 pt-2">
-              <Button type="submit" variant="solid">
-                Submit application
-              </Button>
-              <p role="status" className="max-w-xs text-sm text-ink-muted">
-                {sent
-                  ? 'Your email app should now open with your application, ready to send.'
-                  : 'Submitting opens a pre-filled email in your mail app.'}
-              </p>
-            </div>
-          </form>
+          <AuthGate action="apply as a Saathi">
+            <ApplicationForm />
+          </AuthGate>
         </div>
       </div>
     </>

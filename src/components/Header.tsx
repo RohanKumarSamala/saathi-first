@@ -1,7 +1,8 @@
-import { ChevronDown, Menu, X } from 'lucide-react'
+import { ChevronDown, CircleUserRound, Menu, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import logo from '../assets/logo/logo-horizontal-light.svg'
+import { useAuth } from '../auth/context'
 import { navLinks, services } from '../content/site'
 
 const linkClass =
@@ -102,7 +103,80 @@ function ServicesDropdown() {
   )
 }
 
+/** Sign-in button for visitors; a small menu (admin link, sign out) once signed in. */
+function AccountMenu() {
+  const { user, isAdmin, openAuth, signOut } = useAuth()
+  const [open, setOpen] = useState(false)
+  const wrapper = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: Event) => {
+      if (event instanceof KeyboardEvent ? event.key === 'Escape' : !wrapper.current?.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', close)
+    document.addEventListener('keydown', close)
+    return () => {
+      document.removeEventListener('pointerdown', close)
+      document.removeEventListener('keydown', close)
+    }
+  }, [open])
+
+  if (!user) {
+    return (
+      <button type="button" onClick={openAuth} className={`${linkClass} flex items-center gap-2`}>
+        <CircleUserRound aria-hidden className="size-5" />
+        Sign in
+      </button>
+    )
+  }
+
+  const itemClass =
+    'block w-full rounded-2xl px-4 py-2.5 text-left text-[0.9375rem] font-medium text-blush transition-colors hover:bg-blush/10 hover:text-gold'
+
+  return (
+    <div ref={wrapper} className="relative">
+      <button
+        type="button"
+        aria-label="Account"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="grid size-10 place-items-center rounded-full text-gold transition-colors hover:bg-blush/10"
+      >
+        <CircleUserRound aria-hidden className="size-6" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full w-64 pt-5">
+          <div className="rounded-3xl border border-blush/10 bg-wine/85 p-3 shadow-card backdrop-blur-[15px]">
+            <p className="truncate px-4 py-2 text-sm text-blush/70">
+              {user.phoneNumber ?? user.email}
+            </p>
+            {isAdmin && (
+              <Link to="/admin" onClick={() => setOpen(false)} className={itemClass}>
+                Admin
+              </Link>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false)
+                void signOut()
+              }}
+              className={itemClass}
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function Header() {
+  const { user, isAdmin, openAuth, signOut } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
   const [servicesOpen, setServicesOpen] = useState(false)
   const isActive = useIsActive()
@@ -140,6 +214,7 @@ export function Header() {
                 {link.label}
               </Link>
             ))}
+            <AccountMenu />
           </nav>
 
           <button
@@ -214,6 +289,23 @@ export function Header() {
               {link.label}
             </Link>
           ))}
+          <div aria-hidden className="divider-fade my-2 text-blush/40" />
+          {user && isAdmin && (
+            <Link to="/admin" onClick={closeMenu} className="block rounded-2xl px-4 py-3 text-lg font-medium text-blush">
+              Admin
+            </Link>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              closeMenu()
+              if (user) void signOut()
+              else openAuth()
+            }}
+            className="block w-full rounded-2xl px-4 py-3 text-left text-lg font-medium text-gold"
+          >
+            {user ? 'Sign out' : 'Sign in'}
+          </button>
         </nav>
       </div>
     </header>
