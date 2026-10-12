@@ -5,12 +5,13 @@ import { useAuth } from '../auth/context'
 import { Button } from '../components/Button'
 import { Field } from '../components/Field'
 import { PageHero } from '../components/PageHero'
+import { services } from '../content/site'
 import { createApplication } from '../lib/db'
 import { isValidIndianMobile } from '../lib/enquiry'
 import { fieldProps } from '../lib/fieldProps'
 import { idTypes, isValidId, maskIdNumber } from '../lib/identity'
 
-type FieldName = 'name' | 'mobile' | 'age' | 'area' | 'citizen' | 'idNumber' | 'consent'
+type FieldName = 'name' | 'mobile' | 'age' | 'area' | 'services' | 'citizen' | 'idNumber' | 'consent'
 type Errors = Partial<Record<FieldName, string>>
 
 const nextSteps = [
@@ -34,12 +35,14 @@ function ApplicationForm() {
     const data = new FormData(event.currentTarget)
     const value = (key: string) => String(data.get(key) ?? '').trim()
     const age = Number(value('age'))
+    const offered = data.getAll('services').map(String)
 
     const next: Errors = {}
     if (!value('name')) next.name = 'Please enter your full name.'
     if (!isValidIndianMobile(value('mobile'))) next.mobile = 'Please enter a valid 10-digit mobile number.'
     if (!Number.isInteger(age) || age < 18 || age > 80) next.age = 'You must be 18 or older to apply.'
     if (!value('area')) next.area = 'Please enter your locality.'
+    if (offered.length === 0) next.services = 'Please choose at least one service.'
     if (!data.get('citizen')) next.citizen = 'Saathis must be Indian citizens. Please confirm to continue.'
     if (!isValidId(idType, value('idNumber'))) next.idNumber = `Please enter a valid number (${idHint}).`
     if (!data.get('consent')) next.consent = 'We need your consent to verify your identity and background.'
@@ -59,6 +62,7 @@ function ApplicationForm() {
         area: value('area'),
         languages: value('languages'),
         experience: value('experience'),
+        services: offered,
         indianCitizen: true,
         idType,
         idNumber: maskIdNumber(idType, value('idNumber')),
@@ -137,6 +141,25 @@ function ApplicationForm() {
           />
         </Field>
       </div>
+      <fieldset>
+        <legend className="mb-3 font-medium">Services you can help with</legend>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {services.map((service, index) => (
+            <label key={service.id} className="flex gap-3 font-medium">
+              <input
+                id={index === 0 ? 'saathi-services' : undefined}
+                name="services"
+                value={service.id}
+                type="checkbox"
+                aria-invalid={Boolean(errors.services)}
+                className={checkClass}
+              />
+              {service.name}
+            </label>
+          ))}
+        </div>
+        {errors.services && <p className="mt-2 text-sm text-[#b3261e]">{errors.services}</p>}
+      </fieldset>
       <Field id="saathi-languages" label="Languages">
         <input
           id="saathi-languages"

@@ -34,6 +34,17 @@ Submissions are saved to Firestore: `bookings` and `applications`.
 4. To make someone an admin: sign in on the site, open `/admin`, copy the user ID shown, and
    create a document with that ID in an `admins` collection (any field, e.g. `role: "owner"`).
 
+Our Saathis (`/saathis`) lists services, then the Saathis who provide each one. It reads the public
+`saathis` collection. Setting an application to **verified** in `/admin` publishes that Saathi's
+profile (first name and last initial, area, languages, services); any other status removes it.
+Admins can change the listed services on the verified application card. Re-paste `firestore.rules`
+after pulling this change, or the page stays empty.
+
+Contact Us (`/contact`) lists the services with a Book now button; `/contact/<service id>` is the
+booking form. It shows the Saathis listed for that service, and the customer picks one or leaves
+"Choose for me", which picks one at random when the form is sent. The booking stores the service
+and the Saathi as a preference only: there is no calendar, so the team confirms availability by phone.
+
 Aadhaar numbers are stored masked (last four digits only); other ID numbers are stored in full.
 
 ## Before launch

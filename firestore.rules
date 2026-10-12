@@ -41,5 +41,12 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
       allow delete: if false;
     }
+
+    // Public profiles of verified Saathis, shown on the Our Saathis page.
+    // Admins publish them from the admin page; they hold no phone or ID details.
+    match /saathis/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
   }
 }

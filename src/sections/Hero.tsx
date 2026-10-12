@@ -44,7 +44,7 @@ export function Hero() {
               your family informed at every step.
             </p>
             <div className="mt-8 animate-rise" style={delay(360)}>
-              <ButtonLink to="/#how-it-works">See how it works</ButtonLink>
+              <ButtonLink to="/contact">Book a Saathi</ButtonLink>
             </div>
           </div>
           <div aria-hidden className="divider-fade text-blush/80" />

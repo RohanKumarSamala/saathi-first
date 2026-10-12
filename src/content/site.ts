@@ -331,7 +331,6 @@ export const policies = [
 ]
 
 export const navLinks = [
-  { label: 'How It Works', to: '/#how-it-works' },
   { label: 'Our Plans', to: '/plans' },
   { label: 'Become a Saathi', to: '/become-a-saathi' },
   { label: 'FAQ', to: '/#faq' },

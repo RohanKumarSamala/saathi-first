@@ -9,6 +9,7 @@ import Home from './pages/Home'
 import NotFound from './pages/NotFound'
 import Plans from './pages/Plans'
 import Policy from './pages/Policy'
+import Saathis from './pages/Saathis'
 import Services from './pages/Services'
 
 // Only admins need this code, so it is loaded on demand.
@@ -48,7 +49,7 @@ function Layout() {
       <main id="main" className="[overflow-x:clip]">
         <Outlet />
       </main>
-      <Footer showEnquiry={pathname !== '/contact' && pathname !== '/admin'} />
+      <Footer showEnquiry={!pathname.startsWith('/contact') && pathname !== '/admin'} />
     </>
   )
 }
@@ -61,9 +62,12 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<Home />} />
           <Route path="services" element={<Services />} />
+          <Route path="saathis" element={<Saathis />} />
+          <Route path="saathis/:serviceId" element={<Saathis />} />
           <Route path="plans" element={<Plans />} />
           <Route path="become-a-saathi" element={<BecomeSaathi />} />
           <Route path="contact" element={<Contact />} />
+          <Route path="contact/:serviceId" element={<Contact />} />
           <Route path="policies/:slug" element={<Policy />} />
           <Route
             path="admin"

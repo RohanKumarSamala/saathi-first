@@ -12,13 +12,17 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { AuthGate } from '../auth/AuthGate'
 import { useAuth } from '../auth/context'
 import { PageHero } from '../components/PageHero'
+import { services } from '../content/site'
 import {
   applicationStatuses,
   bookingStatuses,
+  publishSaathi,
+  setApplicationStatus,
   setStatus,
   watchCollection,
   type Application,
   type Booking,
+  type Saathi,
   type Stored,
 } from '../lib/db'
 import { idTypes } from '../lib/identity'
@@ -49,7 +53,7 @@ const initials = (name: string) =>
     .join('')
 
 /** Subscribes to a collection while the admin page is open. */
-function useFeed<T>(name: Tab): Feed<T> {
+function useFeed<T>(name: Tab | 'saathis'): Feed<T> {
   const [rows, setRows] = useState<Stored<T>[] | null>(null)
   const [error, setError] = useState('')
   useEffect(() => watchCollection<T>(name, setRows, (caught) => setError(caught.message)), [name])
@@ -80,18 +84,17 @@ function Stat({ icon: Icon, label, value, highlight }: {
   )
 }
 
-function StatusSelect({ collection, id, value, options }: {
-  collection: Tab
-  id: string
+function StatusSelect({ value, options, onChange }: {
   value: string
   options: readonly string[]
+  onChange: (status: string) => void
 }) {
   return (
     <label>
       <span className="sr-only">Status</span>
       <select
         value={value}
-        onChange={(event) => void setStatus(collection, id, event.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         className={`cursor-pointer rounded-full px-5 py-2.5 text-sm font-semibold capitalize shadow-sm ${statusTone[value] ?? ''}`}
       >
         {options.map((option) => (
@@ -150,13 +153,25 @@ function BookingCard({ row }: { row: Stored<Booking> }) {
     <Card
       name={row.name}
       date={formatDate(row)}
-      status={<StatusSelect collection="bookings" id={row.id} value={row.status} options={bookingStatuses} />}
+      status={
+        <StatusSelect
+          value={row.status}
+          options={bookingStatuses}
+          onChange={(status) => void setStatus('bookings', row.id, status)}
+        />
+      }
     >
       <Detail label="Phone">
         <a href={`tel:${row.phone}`} className={actionLink}>
           <Phone aria-hidden className="size-4" />
           {row.phone}
         </a>
+      </Detail>
+      <Detail label="Service">{row.serviceName}</Detail>
+      <Detail label="Saathi">
+        {row.saathiName
+          ? `${row.saathiName} (${row.saathiChoice === 'random' ? 'picked at random' : 'customer’s choice'})`
+          : row.serviceName && 'Team to assign'}
       </Detail>
       <Detail label="Plan">{row.planName ? `${row.planName} (${row.planPrice})` : 'Not chosen'}</Detail>
       <Detail label="Location">
@@ -180,13 +195,22 @@ function BookingCard({ row }: { row: Stored<Booking> }) {
   )
 }
 
-function ApplicationCard({ row }: { row: Stored<Application> }) {
+/** `saathi` is the applicant's public profile, present once they are verified. */
+function ApplicationCard({ row, saathi }: { row: Stored<Application>; saathi?: Stored<Saathi> }) {
+  const offered = saathi?.services ?? row.services ?? []
+  const toggle = (id: string) =>
+    void publishSaathi(row, offered.includes(id) ? offered.filter((item) => item !== id) : [...offered, id])
+
   return (
     <Card
       name={row.name}
       date={formatDate(row)}
       status={
-        <StatusSelect collection="applications" id={row.id} value={row.status} options={applicationStatuses} />
+        <StatusSelect
+          value={row.status}
+          options={applicationStatuses}
+          onChange={(status) => void setApplicationStatus(row, status)}
+        />
       }
     >
       <Detail label="Mobile">
@@ -202,6 +226,32 @@ function ApplicationCard({ row }: { row: Stored<Application> }) {
       <Detail label="Verification consent">{row.consent ? 'Given' : 'Not given'}</Detail>
       <Detail label="Languages" wide>{row.languages}</Detail>
       <Detail label="Experience / skills" wide>{row.experience}</Detail>
+      <Detail label={row.status === 'verified' ? 'Listed on Our Saathis for' : 'Services offered'} wide>
+        {row.status === 'verified' ? (
+          <span className="mt-1.5 flex flex-wrap gap-2">
+            {services.map((service) => (
+              <button
+                key={service.id}
+                type="button"
+                aria-pressed={offered.includes(service.id)}
+                onClick={() => toggle(service.id)}
+                className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors duration-300 ${
+                  offered.includes(service.id)
+                    ? 'bg-burgundy text-blush'
+                    : 'bg-white/80 text-burgundy ring-1 ring-burgundy/15 hover:bg-burgundy/10'
+                }`}
+              >
+                {service.name}
+              </button>
+            ))}
+          </span>
+        ) : (
+          services
+            .filter((service) => offered.includes(service.id))
+            .map((service) => service.name)
+            .join(', ') || 'Not specified'
+        )}
+      </Detail>
     </Card>
   )
 }
@@ -280,15 +330,18 @@ function Listing<T extends { name: string; status: string }>({ feed, statuses, e
   )
 }
 
-const bookingSearch = (row: Stored<Booking>) => `${row.name} ${row.phone} ${row.planName} ${row.address}`
+const bookingSearch = (row: Stored<Booking>) => `${row.name} ${row.phone} ${row.serviceName ?? ''} ${row.saathiName ?? ''} ${row.planName} ${row.address}`
 const applicationSearch = (row: Stored<Application>) => `${row.name} ${row.mobile} ${row.area} ${row.languages}`
 const renderBooking = (row: Stored<Booking>) => <BookingCard key={row.id} row={row} />
-const renderApplication = (row: Stored<Application>) => <ApplicationCard key={row.id} row={row} />
 
 function Dashboard() {
   const [tab, setTab] = useState<Tab>('bookings')
   const bookings = useFeed<Booking>('bookings')
   const applications = useFeed<Application>('applications')
+  const saathis = useFeed<Saathi>('saathis')
+  const renderApplication = (row: Stored<Application>) => (
+    <ApplicationCard key={row.id} row={row} saathi={saathis.rows?.find((saathi) => saathi.id === row.id)} />
+  )
   const count = <T extends { status: string }>(feed: Feed<T>, status?: string) =>
     feed.rows ? feed.rows.filter((row) => !status || row.status === status).length : null
 

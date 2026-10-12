@@ -1,4 +1,4 @@
-import { ChevronDown, CircleUserRound, Menu, X } from 'lucide-react'
+import { ChevronDown, CircleUserRound, House, Menu, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import logo from '../assets/logo/logo-horizontal-light.svg'
@@ -13,7 +13,7 @@ function useIsActive() {
   return (to: string) => {
     const [path, targetHash] = to.split('#')
     if (targetHash) return pathname === path && hash === `#${targetHash}`
-    return pathname === path
+    return pathname === path || pathname.startsWith(`${path}/`)
   }
 }
 
@@ -178,31 +178,37 @@ function AccountMenu() {
 export function Header() {
   const { user, isAdmin, openAuth, signOut } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
-  const [servicesOpen, setServicesOpen] = useState(false)
   const isActive = useIsActive()
   const panelId = useId()
+  const wrapper = useRef<HTMLDivElement>(null)
 
-  const closeMenu = () => {
-    setMenuOpen(false)
-    setServicesOpen(false)
-  }
+  const closeMenu = () => setMenuOpen(false)
 
+  // The mobile menu closes on Escape or a press anywhere outside the bar and the menu.
   useEffect(() => {
     if (!menuOpen) return
-    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && setMenuOpen(false)
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    const close = (event: Event) => {
+      if (event instanceof KeyboardEvent ? event.key === 'Escape' : !wrapper.current?.contains(event.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', close)
+    document.addEventListener('keydown', close)
+    return () => {
+      document.removeEventListener('pointerdown', close)
+      document.removeEventListener('keydown', close)
+    }
   }, [menuOpen])
 
   return (
     <header className="page-padding fixed inset-x-0 top-5 z-50 nav:top-6">
-      <div className="container-large relative">
+      <div ref={wrapper} className="container-large relative">
         <div className="flex h-16 items-center justify-between gap-4 rounded-full border-b border-wine bg-wine/70 px-5 shadow-[-1px_-1px_0_0_rgb(253_238_238/0.32)] backdrop-blur-[15px] nav:h-18 nav:px-8">
           <Link to="/" aria-label="Saathi First home" onClick={closeMenu} className="shrink-0 rounded-lg">
             <img src={logo} alt="Saathi First" width={373} height={112} className="h-9 w-auto nav:h-10" />
           </Link>
 
-          <nav aria-label="Primary" className="hidden items-center nav:flex">
+          <nav aria-label="Primary" className="hidden items-center min-[1120px]:flex">
             <ServicesDropdown />
             {navLinks.map((link) => (
               <Link
@@ -217,66 +223,36 @@ export function Header() {
             <AccountMenu />
           </nav>
 
-          <button
-            type="button"
-            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-            aria-expanded={menuOpen}
-            aria-controls={panelId}
-            onClick={() => setMenuOpen((value) => !value)}
-            className="grid size-11 place-items-center rounded-full text-blush nav:hidden"
-          >
-            {menuOpen ? <X aria-hidden className="size-7" /> : <Menu aria-hidden className="size-7" />}
-          </button>
+          <div className="flex items-center gap-1 min-[1120px]:hidden">
+            <Link
+              to="/"
+              aria-label="Home"
+              onClick={closeMenu}
+              className="grid size-11 place-items-center rounded-full text-blush transition-colors hover:text-gold"
+            >
+              <House aria-hidden className="size-6" />
+            </Link>
+            <button
+              type="button"
+              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={menuOpen}
+              aria-controls={panelId}
+              onClick={() => setMenuOpen((value) => !value)}
+              className="grid size-11 place-items-center rounded-full text-blush"
+            >
+              {menuOpen ? <X aria-hidden className="size-7" /> : <Menu aria-hidden className="size-7" />}
+            </button>
+          </div>
         </div>
 
         <nav
           id={panelId}
           aria-label="Mobile"
-          className={`absolute inset-x-0 top-full mt-3 max-h-[calc(100dvh-7.5rem)] overflow-y-auto rounded-card border border-blush/10 bg-wine/90 p-4 shadow-card backdrop-blur-[15px] transition-[opacity,transform,visibility] duration-300 ease-out-soft nav:hidden ${
+          className={`absolute inset-x-0 top-full mt-3 max-h-[calc(100dvh-7.5rem)] overflow-y-auto rounded-card border border-blush/10 bg-wine/90 p-4 shadow-card backdrop-blur-[15px] transition-[opacity,transform,visibility] duration-300 ease-out-soft min-[1120px]:hidden ${
             menuOpen ? 'visible translate-y-0 opacity-100' : 'invisible -translate-y-3 opacity-0'
           }`}
         >
-          <button
-            type="button"
-            aria-expanded={servicesOpen}
-            onClick={() => setServicesOpen((value) => !value)}
-            className="flex w-full items-center justify-between rounded-2xl px-4 py-3 text-lg font-medium text-blush"
-          >
-            Our Services
-            <ChevronDown
-              aria-hidden
-              className={`size-5 transition-transform duration-300 ${servicesOpen ? 'rotate-180' : ''}`}
-            />
-          </button>
-          <div
-            className={`grid transition-[grid-template-rows] duration-300 ease-out-soft ${
-              servicesOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
-            }`}
-          >
-            <ul className={`overflow-hidden pl-3 ${servicesOpen ? 'visible' : 'invisible'}`}>
-              <li>
-                <Link
-                  to="/services"
-                  onClick={closeMenu}
-                  className="block rounded-2xl px-4 py-2.5 font-semibold text-gold"
-                >
-                  All services
-                </Link>
-              </li>
-              {services.map((service) => (
-                <li key={service.id}>
-                  <Link
-                    to={`/services#${service.id}`}
-                    onClick={closeMenu}
-                    className="block rounded-2xl px-4 py-2.5 font-medium text-blush/90"
-                  >
-                    {service.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-          {navLinks.map((link) => (
+          {[{ label: 'Our Services', to: '/services' }, ...navLinks].map((link) => (
             <Link
               key={link.to}
               to={link.to}
