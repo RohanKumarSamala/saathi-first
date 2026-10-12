@@ -6,6 +6,7 @@ import { Header } from './components/Header'
 import BecomeSaathi from './pages/BecomeSaathi'
 import Contact from './pages/Contact'
 import Home from './pages/Home'
+import HowItWorks from './pages/HowItWorks'
 import NotFound from './pages/NotFound'
 import Plans from './pages/Plans'
 import Policy from './pages/Policy'
@@ -62,6 +63,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<Home />} />
           <Route path="services" element={<Services />} />
+          <Route path="how-it-works" element={<HowItWorks />} />
           <Route path="saathis" element={<Saathis />} />
           <Route path="saathis/:serviceId" element={<Saathis />} />
           <Route path="plans" element={<Plans />} />

@@ -45,7 +45,8 @@ function StepText({ index, className = '' }: { index: number; className?: string
 
 const updates = ['Picked up from home', 'Arrived at the hospital', 'Dropped home safely']
 
-export function Process() {
+/** `heading` is "h1" when the section is the whole page (/how-it-works). */
+export function Process({ heading: Heading = 'h2' }: { heading?: 'h1' | 'h2' }) {
   return (
     <section
       id="how-it-works"
@@ -53,12 +54,12 @@ export function Process() {
       className="page-padding bg-[linear-gradient(transparent,#fffaf8_12%,#fbe3e0_49%,#f7e6d3_75%,#fffaf8_92%,transparent)]"
     >
       <div className="container-large section-y grid gap-16 nav:gap-20">
-        <h2
+        <Heading
           id="process-heading"
           className="text-heading pt-10 text-center nav:pb-24 nav:pt-36 nav:text-[3.25rem] nav:font-extralight"
         >
           How Saathi First <span className="accent text-rosewood">works</span>
-        </h2>
+        </Heading>
 
         <Block>
           <StepText index={0} className={lead} />
