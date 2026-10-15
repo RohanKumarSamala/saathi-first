@@ -1,9 +1,12 @@
 import {
   createUserWithEmailAndPassword,
+  GoogleAuthProvider,
   RecaptchaVerifier,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPhoneNumber,
+  signInWithPopup,
+  signInWithRedirect,
   type ConfirmationResult,
 } from 'firebase/auth'
 import {
@@ -41,7 +44,13 @@ const messages: Record<string, string> = {
   'auth/invalid-email': 'Please enter a valid email address.',
   'auth/operation-not-allowed': 'This sign-in method is not enabled in Firebase yet.',
   'auth/network-request-failed': 'Network problem. Please check your connection.',
+  'auth/account-exists-with-different-credential':
+    'This email already has an account. Sign in with email or phone instead.',
+  'auth/unauthorized-domain': 'Google sign-in is not allowed on this website address yet.',
 }
+
+/** Closing the Google window is a choice, not an error worth showing. */
+const dismissed = ['auth/popup-closed-by-user', 'auth/cancelled-popup-request']
 
 function describe(error: unknown) {
   const code = (error as { code?: string })?.code ?? ''
@@ -80,6 +89,48 @@ function Feedback({ error, notice }: { error: string; notice?: string }) {
     >
       {error || notice}
     </p>
+  )
+}
+
+function GoogleButton() {
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const signIn = async () => {
+    if (!auth) return
+    setBusy(true)
+    setError('')
+    const provider = new GoogleAuthProvider()
+    provider.setCustomParameters({ prompt: 'select_account' })
+    try {
+      await signInWithPopup(auth, provider)
+    } catch (caught) {
+      const code = (caught as { code?: string })?.code ?? ''
+      // Some phone browsers block pop-ups; a full-page redirect works there.
+      if (code === 'auth/popup-blocked') await signInWithRedirect(auth, provider)
+      else if (!dismissed.includes(code)) setError(describe(caught))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={signIn}
+        disabled={busy}
+        className="flex h-16 w-full items-center justify-center gap-3 rounded-2xl border border-burgundy/20 bg-white text-lg font-semibold text-ink shadow-[0_10px_24px_-18px_rgb(107_30_46/0.6)] transition-[transform,box-shadow,border-color] duration-300 ease-out-soft hover:-translate-y-0.5 hover:border-burgundy/40 disabled:pointer-events-none disabled:opacity-55"
+      >
+        <svg aria-hidden viewBox="0 0 48 48" className="size-6">
+          <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z" />
+          <path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
+          <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z" />
+          <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z" />
+        </svg>
+        {busy ? 'Please wait…' : 'Continue with Google'}
+      </button>
+      <Feedback error={error} />
+    </>
   )
 }
 
@@ -387,7 +438,13 @@ export function AuthDialog({ onClose }: { onClose: () => void }) {
 
           {firebaseReady ? (
             <>
-              <div role="tablist" aria-label="Sign-in method" className="my-8 grid grid-cols-2 gap-3">
+              <div className="mt-8">
+                <GoogleButton />
+              </div>
+              <p className="mt-6 flex items-center gap-4 text-sm font-semibold text-ink-muted before:h-px before:grow before:bg-burgundy/15 after:h-px after:grow after:bg-burgundy/15">
+                or
+              </p>
+              <div role="tablist" aria-label="Sign-in method" className="my-6 grid grid-cols-2 gap-3">
                 {tabs.map(({ id, label, hint, icon: Icon }) => {
                   const selected = method === id
                   return (

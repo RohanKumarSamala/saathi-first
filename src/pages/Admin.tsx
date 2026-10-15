@@ -1,6 +1,9 @@
 import {
   CalendarClock,
   ClipboardList,
+  ExternalLink,
+  KeyRound,
+  LogOut,
   MapPin,
   Phone,
   Search,
@@ -8,10 +11,12 @@ import {
   UserRoundPlus,
   type LucideIcon,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { EmailAuthProvider, linkWithCredential } from 'firebase/auth'
+import { Link } from 'react-router-dom'
+import logo from '../assets/logo/logo-horizontal-light.svg'
 import { AuthGate } from '../auth/AuthGate'
 import { useAuth } from '../auth/context'
-import { PageHero } from '../components/PageHero'
 import { services } from '../content/site'
 import {
   applicationStatuses,
@@ -25,6 +30,7 @@ import {
   type Saathi,
   type Stored,
 } from '../lib/db'
+import { auth } from '../lib/firebase'
 import { idTypes } from '../lib/identity'
 
 type Tab = 'bookings' | 'applications'
@@ -410,25 +416,162 @@ function AdminOnly() {
   )
 }
 
+const passwordErrors: Record<string, string> = {
+  'auth/weak-password': 'Please choose a password with at least 6 characters.',
+  'auth/requires-recent-login': 'For safety, sign out, sign in with Google again, then set the password straight away.',
+  'auth/provider-already-linked': 'This account already has a password. Use Forgot password to change it.',
+  'auth/credential-already-in-use': 'Another account already uses this email with a password.',
+  'auth/email-already-in-use': 'Another account already uses this email with a password.',
+}
+
+/**
+ * Lets someone who signed in with Google add a password to the same account,
+ * so email and password sign-in reaches the same user ID (and admin access).
+ */
+function SetPassword() {
+  const { user } = useAuth()
+  const [open, setOpen] = useState(false)
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState('')
+  const [state, setState] = useState<'idle' | 'saving' | 'done'>('idle')
+
+  const hasPassword = user?.providerData.some((provider) => provider.providerId === 'password')
+  if (!user?.email || (hasPassword && state !== 'done')) return null
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    const current = auth?.currentUser
+    if (!current?.email) return
+    if (password.length < 6) return setError(passwordErrors['auth/weak-password'])
+    if (password !== confirm) return setError('The two passwords do not match.')
+    setState('saving')
+    setError('')
+    try {
+      await linkWithCredential(current, EmailAuthProvider.credential(current.email, password))
+      setState('done')
+    } catch (caught) {
+      const code = (caught as { code?: string })?.code ?? ''
+      setError(passwordErrors[code] ?? 'Could not set the password. Please try again.')
+      setState('idle')
+    }
+  }
+
+  const field =
+    'h-12 w-full rounded-xl border border-burgundy/20 bg-white px-4 font-medium text-ink focus-visible:border-burgundy focus-visible:outline-none'
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex items-center gap-1.5 rounded-full px-3 py-2 transition-colors hover:bg-blush/10 hover:text-gold"
+      >
+        <KeyRound aria-hidden className="size-4" />
+        <span className="hidden sm:inline">Set password</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-3 w-80 rounded-3xl bg-cream p-6 text-ink shadow-card ring-1 ring-gold/40">
+          {state === 'done' ? (
+            <p role="status" className="font-medium">
+              Password set. You can now sign in with <strong className="break-all">{user.email}</strong> and this
+              password, or with Google.
+            </p>
+          ) : (
+            <form noValidate onSubmit={submit} className="grid gap-3">
+              <p className="text-sm text-ink-muted">
+                Add a password so you can also sign in with <strong className="break-all text-ink">{user.email}</strong>.
+              </p>
+              <label className="grid gap-1 text-sm font-semibold text-ink-muted">
+                New password
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className={field}
+                />
+              </label>
+              <label className="grid gap-1 text-sm font-semibold text-ink-muted">
+                Confirm password
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={confirm}
+                  onChange={(event) => setConfirm(event.target.value)}
+                  className={field}
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={state === 'saving'}
+                className="mt-1 h-12 rounded-xl bg-burgundy font-semibold text-blush transition-colors hover:bg-wine disabled:opacity-60"
+              >
+                {state === 'saving' ? 'Saving…' : 'Save password'}
+              </button>
+              {error && (
+                <p role="status" className="text-sm font-medium text-[#8c1d18]">
+                  {error}
+                </p>
+              )}
+            </form>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Slim admin-only bar: brand, who is signed in, a way back to the site and sign out. */
+function AdminBar() {
+  const { user, signOut } = useAuth()
+  return (
+    <header className="page-padding sticky top-0 z-40 bg-wine text-blush shadow-[0_10px_30px_-20px_rgb(0_0_0/0.8)]">
+      <div className="container-large flex h-16 items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <img src={logo} alt="Saathi First" width={373} height={112} className="h-8 w-auto" />
+          <span className="rounded-full bg-blush/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-gold">
+            Admin
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-sm font-medium sm:gap-4">
+          {user && (
+            <span className="hidden max-w-60 truncate text-blush/70 sm:block">{user.email ?? user.phoneNumber}</span>
+          )}
+          <SetPassword />
+          <Link to="/" className="flex items-center gap-1.5 rounded-full px-3 py-2 transition-colors hover:bg-blush/10 hover:text-gold">
+            <ExternalLink aria-hidden className="size-4" />
+            View site
+          </Link>
+          {user && (
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              className="flex items-center gap-1.5 rounded-full px-3 py-2 transition-colors hover:bg-blush/10 hover:text-gold"
+            >
+              <LogOut aria-hidden className="size-4" />
+              Sign out
+            </button>
+          )}
+        </div>
+      </div>
+    </header>
+  )
+}
+
 export default function Admin() {
   return (
     <>
-      <PageHero
-        title="Admin"
-        intro="Customer requests from the Contact page and applications from Become a Saathi, newest first."
-        tagline={
-          <>
-            Everything in <span className="accent text-rosewood">one place.</span>
-          </>
-        }
-      />
-      <div className="page-padding">
-        <div className="container-large py-16 nav:py-24">
+      <div aria-hidden className="page-wash fixed inset-0 -z-10" />
+      <AdminBar />
+      <main className="page-padding">
+        <div className="container-large py-10 nav:py-14">
           <AuthGate action="open the admin page">
             <AdminOnly />
           </AuthGate>
         </div>
-      </div>
+      </main>
     </>
   )
 }

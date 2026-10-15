@@ -50,7 +50,7 @@ function Layout() {
       <main id="main" className="[overflow-x:clip]">
         <Outlet />
       </main>
-      <Footer showEnquiry={!pathname.startsWith('/contact') && pathname !== '/admin'} />
+      <Footer showEnquiry={!pathname.startsWith('/contact')} />
     </>
   )
 }
@@ -71,16 +71,17 @@ export default function App() {
           <Route path="contact" element={<Contact />} />
           <Route path="contact/:serviceId" element={<Contact />} />
           <Route path="policies/:slug" element={<Policy />} />
-          <Route
-            path="admin"
-            element={
-              <Suspense fallback={null}>
-                <Admin />
-              </Suspense>
-            }
-          />
           <Route path="*" element={<NotFound />} />
         </Route>
+        {/* The admin page is a work tool, so it has its own bar instead of the site header and footer. */}
+        <Route
+          path="admin"
+          element={
+            <Suspense fallback={null}>
+              <Admin />
+            </Suspense>
+          }
+        />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
