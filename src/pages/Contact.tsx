@@ -252,7 +252,7 @@ function BookingForm({ service, matching, choice }: {
 /** Burgundy photo panel shared by the contact landing and the booking page. */
 function DarkPanel({ children }: { children: ReactNode }) {
   return (
-    <section className="page-padding relative isolate overflow-hidden bg-burgundy text-blush">
+    <section data-nav-hero className="page-padding relative isolate overflow-hidden bg-burgundy text-blush">
       <Img
         name="companionship"
         alt=""

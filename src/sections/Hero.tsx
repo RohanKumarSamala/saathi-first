@@ -5,7 +5,7 @@ const delay = (ms: number) => ({ animationDelay: `${ms}ms` })
 
 export function Hero() {
   return (
-    <header className="relative isolate overflow-hidden bg-burgundy bg-[radial-gradient(circle_at_85%_0%,#a8454f,transparent_60%)] text-blush">
+    <header data-nav-hero className="relative isolate overflow-hidden bg-burgundy bg-[radial-gradient(circle_at_85%_0%,#a8454f,transparent_60%)] text-blush">
       <picture>
         <source media="(max-width: 767px)" srcSet="/images/hero-mobile-900.webp" />
         <img
