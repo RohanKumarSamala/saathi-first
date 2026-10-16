@@ -19,6 +19,13 @@ service cloud.firestore {
       return signedIn() && request.resource.data.uid == request.auth.uid;
     }
 
+    // Google accounts arrive with a verified email and phone accounts with a verified number;
+    // email and password accounts must click the link in their verification email first.
+    function verifiedContact() {
+      return request.auth.token.get('email_verified', false) == true
+        || request.auth.token.get('phone_number', '') != '';
+    }
+
     match /admins/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
       allow write: if false;
@@ -26,7 +33,7 @@ service cloud.firestore {
 
     // Customer requests from the Contact page.
     match /bookings/{id} {
-      allow create: if ownsNew() && request.resource.data.status == 'new';
+      allow create: if ownsNew() && verifiedContact() && request.resource.data.status == 'new';
       allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
@@ -35,7 +42,7 @@ service cloud.firestore {
 
     // Applications from the Become a Saathi page.
     match /applications/{id} {
-      allow create: if ownsNew() && request.resource.data.status == 'pending';
+      allow create: if ownsNew() && verifiedContact() && request.resource.data.status == 'pending';
       allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);

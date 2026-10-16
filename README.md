@@ -45,6 +45,15 @@ booking form. It shows the Saathis listed for that service, and the customer pic
 "Choose for me", which picks one at random when the form is sent. The booking stores the service
 and the Saathi as a preference only: there is no calendar, so the team confirms availability by phone.
 
+Email and password accounts are sent a verification email on sign-up and cannot book, apply or open
+`/admin` until they click the link (`src/auth/verify.ts`, enforced again by `verifiedContact()` in
+`firestore.rules`). Google and phone accounts are already verified.
+
+Password reset and email verification links open `/auth/action` on this site (new password with
+confirmation, then back to sign-in). This needs Firebase > Authentication > Templates > (any template) >
+edit > **Customize action URL** set to `<site address>/auth/action`, e.g.
+`http://localhost:5173/auth/action` locally; change it to the live domain at launch.
+
 Aadhaar numbers are stored masked (last four digits only); other ID numbers are stored in full.
 
 ## Before launch

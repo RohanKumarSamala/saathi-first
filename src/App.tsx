@@ -3,6 +3,7 @@ import { BrowserRouter, Outlet, Route, Routes, useLocation } from 'react-router-
 import { AuthProvider } from './auth/AuthProvider'
 import { Footer } from './components/Footer'
 import { Header } from './components/Header'
+import AuthAction from './pages/AuthAction'
 import BecomeSaathi from './pages/BecomeSaathi'
 import Contact from './pages/Contact'
 import Home from './pages/Home'
@@ -50,7 +51,7 @@ function Layout() {
       <main id="main" className="[overflow-x:clip]">
         <Outlet />
       </main>
-      <Footer showEnquiry={!pathname.startsWith('/contact')} />
+      <Footer showEnquiry={!pathname.startsWith('/contact') && !pathname.startsWith('/auth')} />
     </>
   )
 }
@@ -71,6 +72,7 @@ export default function App() {
           <Route path="contact" element={<Contact />} />
           <Route path="contact/:serviceId" element={<Contact />} />
           <Route path="policies/:slug" element={<Policy />} />
+          <Route path="auth/action" element={<AuthAction />} />
           <Route path="*" element={<NotFound />} />
         </Route>
         {/* The admin page is a work tool, so it has its own bar instead of the site header and footer. */}

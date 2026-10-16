@@ -28,6 +28,7 @@ import { Img } from '../components/Img'
 import { isValidIndianMobile } from '../lib/enquiry'
 import { auth, firebaseReady } from '../lib/firebase'
 import { OtpInput } from './OtpInput'
+import { sendVerification } from './verify'
 
 type Method = 'phone' | 'email'
 
@@ -36,10 +37,22 @@ const messages: Record<string, string> = {
   'auth/too-many-requests': 'Too many attempts. Please wait a few minutes and try again.',
   'auth/invalid-verification-code': 'That code is incorrect. Please check and try again.',
   'auth/code-expired': 'That code has expired. Please request a new one.',
-  'auth/invalid-credential': 'Incorrect email or password.',
+  // Firebase gives the same error for a wrong password and for an account that only uses Google.
+  'auth/invalid-credential':
+    'Incorrect email or password. If you signed up with Google, use Continue with Google instead.',
   'auth/user-not-found': 'No account found with that email.',
-  'auth/wrong-password': 'Incorrect email or password.',
-  'auth/email-already-in-use': 'An account already exists with that email. Try signing in.',
+  'auth/wrong-password':
+    'Incorrect email or password. If you signed up with Google, use Continue with Google instead.',
+  'auth/email-already-in-use':
+    'An account already exists with that email. Sign in instead, or use Continue with Google if that is how you joined.',
+  'auth/billing-not-enabled':
+    'Phone sign-in is not available yet. Please use Google or email for now.',
+  'auth/quota-exceeded': 'Too many codes have been sent today. Please use Google or email for now.',
+  'auth/captcha-check-failed': 'The security check failed. Please reload the page and try again.',
+  'auth/unauthorized-continue-uri':
+    'This website address is not allowed to send account emails yet. Please contact us.',
+  'auth/missing-email': 'Please enter your email address.',
+  'auth/popup-blocked': 'Your browser blocked the Google window. Please allow pop-ups and try again.',
   'auth/weak-password': 'Please choose a password with at least 6 characters.',
   'auth/invalid-email': 'Please enter a valid email address.',
   'auth/operation-not-allowed': 'This sign-in method is not enabled in Firebase yet.',
@@ -236,13 +249,96 @@ function PhoneForm() {
   )
 }
 
-function EmailForm() {
-  const [creating, setCreating] = useState(false)
-  const [email, setEmail] = useState('')
+/** Asks for the account email and sends a link to our /auth/action page to set a new password. */
+function ResetForm({ email, setEmail, onBack }: {
+  email: string
+  setEmail: (email: string) => void
+  onBack: () => void
+}) {
+  const [error, setError] = useState('')
+  const [sentTo, setSentTo] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const send = async (event?: FormEvent) => {
+    event?.preventDefault()
+    if (!auth) return
+    setBusy(true)
+    setError('')
+    try {
+      // The link carries this page's address, so the reset page can bring them back here.
+      await sendPasswordResetEmail(auth, email.trim(), { url: window.location.href })
+      setSentTo(email.trim())
+    } catch (caught) {
+      setError(describe(caught))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (sentTo) {
+    return (
+      <div className="grid gap-5">
+        <p className="rounded-2xl bg-gold/20 px-5 py-4 font-medium text-wine">
+          If an account exists for <strong className="break-all">{sentTo}</strong>, we have emailed it a link to
+          set a new password. It can take a minute, and may land in spam.
+        </p>
+        <p className="text-sm text-ink-muted">
+          Didn’t get it?{' '}
+          <button type="button" onClick={() => void send()} disabled={busy} className={textLink}>
+            {busy ? 'Sending…' : 'Send it again'}
+          </button>
+        </p>
+        <button type="button" onClick={onBack} className={`${textLink} justify-self-start text-sm`}>
+          Back to sign in
+        </button>
+        <Feedback error={error} />
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <form noValidate onSubmit={send} className="grid gap-5">
+        <div>
+          <p className="text-xl font-semibold">Reset your password</p>
+          <p className="mt-1 text-ink-muted">
+            Enter the email you signed up with and we’ll send you a link to set a new password.
+          </p>
+        </div>
+        <div>
+          <label htmlFor="auth-reset-email" className={labelClass}>
+            Email address
+          </label>
+          <input
+            id="auth-reset-email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            type="email"
+            autoComplete="email"
+            autoFocus
+            placeholder="you@example.com"
+            className={inputClass}
+          />
+        </div>
+        <Submit busy={busy} disabled={!email.trim()}>
+          Send reset link
+        </Submit>
+        <button type="button" onClick={onBack} className={`${textLink} justify-self-start text-sm`}>
+          Back to sign in
+        </button>
+      </form>
+      <Feedback error={error} />
+    </>
+  )
+}
+
+function EmailForm({ initialEmail = '' }: { initialEmail?: string }) {
+  const [mode, setMode] = useState<'signin' | 'create' | 'reset'>('signin')
+  const creating = mode === 'create'
+  const [email, setEmail] = useState(initialEmail)
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
 
   const submit = async (event: FormEvent) => {
@@ -250,26 +346,19 @@ function EmailForm() {
     if (!auth) return
     setBusy(true)
     setError('')
-    setNotice('')
     try {
       const run = creating ? createUserWithEmailAndPassword : signInWithEmailAndPassword
-      await run(auth, email.trim(), password)
+      const { user } = await run(auth, email.trim(), password)
+      // New accounts must confirm their email before booking; the gate offers a resend if this fails.
+      if (creating) await sendVerification(user).catch(() => undefined)
     } catch (caught) {
       setError(describe(caught))
       setBusy(false)
     }
   }
 
-  const reset = async () => {
-    if (!auth) return
-    setError('')
-    setNotice('')
-    try {
-      await sendPasswordResetEmail(auth, email.trim())
-      setNotice('If an account exists for that email, a reset link is on its way.')
-    } catch (caught) {
-      setError(describe(caught))
-    }
+  if (mode === 'reset') {
+    return <ResetForm email={email} setEmail={setEmail} onBack={() => setMode('signin')} />
   }
 
   return (
@@ -285,7 +374,7 @@ function EmailForm() {
             onChange={(event) => setEmail(event.target.value)}
             type="email"
             autoComplete="email"
-            autoFocus
+            autoFocus={!initialEmail}
             placeholder="you@example.com"
             className={inputClass}
           />
@@ -296,7 +385,14 @@ function EmailForm() {
               Password
             </label>
             {!creating && (
-              <button type="button" onClick={reset} disabled={!email} className={`${textLink} text-sm`}>
+              <button
+                type="button"
+                onClick={() => {
+                  setError('')
+                  setMode('reset')
+                }}
+                className={`${textLink} text-sm`}
+              >
                 Forgot password?
               </button>
             )}
@@ -308,6 +404,7 @@ function EmailForm() {
               onChange={(event) => setPassword(event.target.value)}
               type={showPassword ? 'text' : 'password'}
               autoComplete={creating ? 'new-password' : 'current-password'}
+              autoFocus={Boolean(initialEmail)}
               placeholder={creating ? 'At least 6 characters' : 'Your password'}
               className={`${inputClass} pr-16`}
             />
@@ -328,11 +425,11 @@ function EmailForm() {
       </form>
       <p className="mt-5 text-center text-sm text-ink-muted">
         {creating ? 'Already have an account?' : 'New to Saathi First?'}{' '}
-        <button type="button" onClick={() => setCreating((value) => !value)} className={textLink}>
+        <button type="button" onClick={() => setMode(creating ? 'signin' : 'create')} className={textLink}>
           {creating ? 'Sign in' : 'Create an account'}
         </button>
       </p>
-      <Feedback error={error} notice={notice} />
+      <Feedback error={error} />
     </>
   )
 }
@@ -352,8 +449,8 @@ const promises: { icon: LucideIcon; text: string }[] = [
  * Sign-in pop-up. A plain positioned layer (not a native <dialog>) so the
  * reCAPTCHA challenge Firebase may show for phone sign-in can sit above it.
  */
-export function AuthDialog({ onClose }: { onClose: () => void }) {
-  const [method, setMethod] = useState<Method>('phone')
+export function AuthDialog({ initialEmail, onClose }: { initialEmail?: string; onClose: () => void }) {
+  const [method, setMethod] = useState<Method>(initialEmail ? 'email' : 'phone')
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === 'Escape' && onClose()
@@ -475,7 +572,7 @@ export function AuthDialog({ onClose }: { onClose: () => void }) {
                   )
                 })}
               </div>
-              {method === 'phone' ? <PhoneForm /> : <EmailForm />}
+              {method === 'phone' ? <PhoneForm /> : <EmailForm initialEmail={initialEmail} />}
             </>
           ) : (
             <p className="mt-8 rounded-3xl border border-gold/50 bg-gold/15 p-6 font-medium">

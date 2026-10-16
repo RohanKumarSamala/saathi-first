@@ -3,12 +3,18 @@ import { createContext, useContext } from 'react'
 
 export type AuthState = {
   user: User | null
+  /** Mirrors user.emailVerified so the context updates when it flips after refreshUser. */
+  emailVerified: boolean
   /** True while Firebase restores a previous session on page load. */
   loading: boolean
   isAdmin: boolean
   /** Opens the sign-in pop-up. */
   openAuth: () => void
+  /** Opens the sign-in pop-up on the email tab with the address filled in. */
+  openEmailSignIn: (email: string) => void
   signOut: () => Promise<void>
+  /** Re-reads the account from Firebase, e.g. after the visitor confirms their email. */
+  refreshUser: () => Promise<void>
 }
 
 export const AuthContext = createContext<AuthState | null>(null)

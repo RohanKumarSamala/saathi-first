@@ -10,8 +10,8 @@ export const site = {
   city: 'Hyderabad, Telangana',
   phoneDisplay: '+91 97043 92250',
   phoneHref: 'tel:+919704392250',
-  email: 'support@saathifirst.in',
-  emailHref: 'mailto:support@saathifirst.in',
+  email: 'saathifirst@gmail.com',
+  emailHref: 'mailto:saathifirst@gmail.com',
 }
 
 export type Service = {
