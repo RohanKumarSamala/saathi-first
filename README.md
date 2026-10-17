@@ -56,6 +56,43 @@ edit > **Customize action URL** set to `<site address>/auth/action`, e.g.
 
 Aadhaar numbers are stored masked (last four digits only); other ID numbers are stored in full.
 
+### Booking: hours, time and place
+
+The booking form is four numbered steps with a summary before **Confirm booking**:
+1. **How long** — 2 hrs, 4 hrs, 8 hrs or **Whole day**, or exact hours with − / +. The smallest plan that
+   covers the hours is used (3 hours → Care Companion). Property Monitoring is one visit, so it has no hours.
+2. **When** — Today (90 minutes' notice), Tomorrow or another day up to 90 days ahead; 7 am to 8 pm.
+3. **Where** — share location, type an address, or both (one is required).
+4. **Your details** — name, mobile, optional note.
+
+Plan hours, names and prices live in `plans` (`src/content/site.ts`) **and** in `planHours`, `planNames`
+and `planPrices` in `firestore.rules`, which reject any other price. Change both together and run
+`npm run test:rules`. Customers can ask for more time on a confirmed visit (up to a whole day); admins
+approve or decline it on the booking, and approving moves it to the covering plan.
+
+### Booking tracking
+
+After booking, customers follow their request on **My bookings** (`/bookings`, also in the account menu):
+a tracker (Requested → Saathi assigned → Visit started → Completed), the assigned Saathi's name and visit
+time, and WhatsApp / Call buttons, plus past bookings with Book again. Customers can cancel only while a
+request is unassigned; after that they call.
+
+In `/admin`, each booking has an **Assigned Saathi** panel: choose a verified Saathi (those offering the
+service and the customer's choice are marked), confirm their WhatsApp number and set the visit time, then
+**Mark visit started** and **Mark completed**. The Saathi's number is stored on that booking only, so only
+that customer and admins can see it; it never appears on the public Our Saathis page.
+
+### Security rules tests
+
+`firestore.rules` checks who may write **and** exactly what they may write (fields, types, lengths,
+allowed values, server timestamps, masked Aadhaar), because anyone signed in can bypass the website
+and write to Firestore directly. `tests/firestore.rules.test.js` covers each role and each known attack.
+Run it after any rules change (needs Java and the Firebase CLI; it uses a local emulator, not your data):
+
+```bash
+npm run test:rules
+```
+
 ## Before launch
 
 - **The footer enquiry form still uses email.** It calls `openEnquiryEmail` in

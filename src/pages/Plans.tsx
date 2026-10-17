@@ -38,7 +38,7 @@ export default function Plans() {
                   </li>
                 ))}
               </ul>
-              <ButtonLink to={`/contact?plan=${plan.id}`} variant="solid" className="mt-auto">
+              <ButtonLink to={plan.hours ? `/contact?plan=${plan.id}` : '/contact/property-monitoring'} variant="solid" className="mt-auto">
                 Choose plan
               </ButtonLink>
             </li>

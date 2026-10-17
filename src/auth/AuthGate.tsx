@@ -36,7 +36,7 @@ function Panel({ dark, icon, children }: { dark: boolean; icon: ReactNode; child
 type Sending = 'idle' | 'sending' | 'sent' | 'limited' | 'failed' | 'checking' | 'not-yet'
 
 const sendingNotes: Partial<Record<Sending, string>> = {
-  sent: 'A new link is on its way. It can take a minute, and may land in spam.',
+  sent: `A new link is on its way from noreply@${import.meta.env.VITE_FIREBASE_AUTH_DOMAIN}. It can take a minute; check Spam and Promotions too.`,
   limited: 'We sent several emails already. Please wait a few minutes before asking again.',
   failed: 'We could not send the email. Please try again.',
   'not-yet': 'Not verified yet. Click the link in the email first, then try again.',
@@ -46,6 +46,8 @@ const sendingNotes: Partial<Record<Sending, string>> = {
 function VerifyEmail({ action, dark }: { action: string; dark: boolean }) {
   const { user, refreshUser, signOut } = useAuth()
   const [state, setState] = useState<Sending>('idle')
+  // Firebase's error code when sending fails, shown so the cause can be fixed rather than guessed.
+  const [failure, setFailure] = useState('')
 
   // Coming back to this tab after clicking the link unlocks the page without a reload.
   useEffect(() => {
@@ -64,11 +66,14 @@ function VerifyEmail({ action, dark }: { action: string; dark: boolean }) {
     const current = auth?.currentUser
     if (!current) return
     setState('sending')
+    setFailure('')
     try {
       await sendVerification(current)
       setState('sent')
     } catch (caught) {
-      setState((caught as { code?: string })?.code === 'auth/too-many-requests' ? 'limited' : 'failed')
+      const code = (caught as { code?: string })?.code ?? 'unknown error'
+      setFailure(code)
+      setState(code === 'auth/too-many-requests' ? 'limited' : 'failed')
     }
   }
 
@@ -105,6 +110,7 @@ function VerifyEmail({ action, dark }: { action: string; dark: boolean }) {
       </div>
       <p role="status" className={`mt-4 min-h-5 text-sm ${muted}`}>
         {sendingNotes[state]}
+        {state === 'failed' && failure && ` (${failure})`}
       </p>
       <p className={`mt-4 text-sm ${muted}`}>
         Wrong email?{' '}

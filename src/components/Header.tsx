@@ -156,6 +156,9 @@ function AccountMenu() {
             <p className="truncate px-4 py-2 text-sm text-blush/70">
               {user.phoneNumber ?? user.email}
             </p>
+            <Link to="/bookings" onClick={() => setOpen(false)} className={itemClass}>
+              My bookings
+            </Link>
             {isAdmin && (
               <Link to="/admin" onClick={() => setOpen(false)} className={itemClass}>
                 Admin
@@ -390,6 +393,16 @@ export function Header() {
             </Link>
           ))}
           <div aria-hidden className="divider-fade my-2 text-blush/40" />
+          {user && (
+            <Link
+              to="/bookings"
+              onClick={closeMenu}
+              aria-current={isActive('/bookings') ? 'page' : undefined}
+              className={`block rounded-2xl px-4 py-3 text-lg font-medium ${isActive('/bookings') ? 'text-gold' : 'text-blush'}`}
+            >
+              My bookings
+            </Link>
+          )}
           {user && isAdmin && (
             <Link to="/admin" onClick={closeMenu} className="block rounded-2xl px-4 py-3 text-lg font-medium text-blush">
               Admin

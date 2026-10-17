@@ -1,8 +1,15 @@
 rules_version = '2';
 
 // Paste into Firebase console > Firestore Database > Rules (or deploy with the Firebase CLI).
+// Tested by tests/firestore.rules.test.js: run `npm run test:rules` after any change.
+//
+// The website validates its forms, but anyone signed in can bypass the site and talk to
+// Firestore directly, so every write is re-checked here: who is writing, which fields,
+// their types, lengths and allowed values.
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ---------- Who ----------
 
     function signedIn() {
       return request.auth != null;
@@ -15,16 +22,215 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
-    function ownsNew() {
-      return signedIn() && request.resource.data.uid == request.auth.uid;
-    }
-
     // Google accounts arrive with a verified email and phone accounts with a verified number;
     // email and password accounts must click the link in their verification email first.
     function verifiedContact() {
       return request.auth.token.get('email_verified', false) == true
         || request.auth.token.get('phone_number', '') != '';
     }
+
+    // ---------- What ----------
+
+    function text(value, min, max) {
+      return value is string && value.size() >= min && value.size() <= max;
+    }
+
+    function optionalText(data, key, max) {
+      return !(key in data) || text(data[key], 0, max);
+    }
+
+    // Digits with optional +, spaces or hyphens, as people type them.
+    function phone(value) {
+      return value is string && value.matches('^[+]?[0-9][0-9 -]{8,15}$');
+    }
+
+    // Stamped by the server (serverTimestamp), so entries cannot be back-dated.
+    function stampedNow(data) {
+      return data.createdAt == request.time;
+    }
+
+    function location(value) {
+      return value == null || (
+        value is map
+        && value.keys().hasOnly(['lat', 'lng', 'accuracy'])
+        && value.lat is number && value.lat >= -90 && value.lat <= 90
+        && value.lng is number && value.lng >= -180 && value.lng <= 180
+        && value.accuracy is number && value.accuracy >= 0
+      );
+    }
+
+    // Mirrors `plans` in src/content/site.ts. Change both together, then run npm run test:rules.
+    function planHours() {
+      return {'quick': 2, 'care': 4, 'day': 8, 'extended': 12};
+    }
+    function planNames() {
+      return {'property': 'Property Monitoring', 'quick': 'Quick Companion', 'care': 'Care Companion',
+              'day': 'Day Companion', 'extended': 'Extended Companion'};
+    }
+    function planPrices() {
+      return {'property': '₹99 / per visit', 'quick': '₹249 / up to 2 hrs', 'care': '₹499 / up to 4 hrs',
+              'day': '₹999 / up to 8 hrs', 'extended': '₹1,299 / up to 12 hrs'};
+    }
+
+    // Property Monitoring is one visit with no hours; every other service is booked by the hour
+    // on a companion plan that covers those hours. Name and price must be the catalogue's own,
+    // so a booking can never carry a made-up price.
+    function validPlan(data) {
+      return data.planName == planNames().get(data.planId, '')
+        && data.planPrice == planPrices().get(data.planId, '')
+        && (
+          (data.serviceId == 'property-monitoring' && data.planId == 'property' && data.hours == null)
+          || (data.serviceId != 'property-monitoring' && data.planId in planHours()
+              && data.hours is int && data.hours >= 1 && data.hours <= planHours()[data.planId])
+        );
+    }
+
+    function validBooking(data) {
+      return data.keys().hasAll(['uid', 'name', 'phone', 'planId', 'planName', 'planPrice', 'hours',
+                                 'preferredStart', 'location', 'address', 'message', 'status',
+                                 'createdAt', 'serviceId', 'serviceName'])
+        && data.keys().hasOnly(['uid', 'name', 'phone', 'planId', 'planName', 'planPrice', 'hours',
+                                'preferredStart', 'location', 'address', 'message', 'status',
+                                'createdAt', 'serviceId', 'serviceName', 'saathiId', 'saathiName',
+                                'saathiChoice'])
+        && data.uid == request.auth.uid
+        && data.status == 'new'
+        && stampedNow(data)
+        && text(data.name, 1, 100)
+        && phone(data.phone)
+        && text(data.serviceId, 1, 60)
+        && text(data.serviceName, 1, 80)
+        && validPlan(data)
+        // The visit is in the future, but not absurdly far ahead.
+        && data.preferredStart is timestamp
+        && data.preferredStart > request.time
+        && data.preferredStart < request.time + duration.value(92, 'd')
+        && location(data.location)
+        && text(data.address, 0, 300)
+        // The Saathi must know where to go: a shared location, a typed address, or both.
+        && (data.location != null || data.address.size() >= 3)
+        && text(data.message, 0, 2000)
+        && optionalText(data, 'saathiId', 128)
+        && optionalText(data, 'saathiName', 100)
+        && (!('saathiChoice' in data) || data.saathiChoice in ['chosen', 'random', 'none']);
+    }
+
+    // Mirrors src/lib/identity.ts. Aadhaar must arrive masked: only the last four digits.
+    function validId(type, number) {
+      return number is string && (
+           (type == 'aadhaar' && number.matches('^XXXX XXXX [0-9]{4}$'))
+        || (type == 'pan' && number.matches('^[A-Z]{5}[0-9]{4}[A-Z]$'))
+        || (type == 'voter' && number.matches('^[A-Z]{3}[0-9]{7}$'))
+        || (type == 'licence' && number.matches('^[A-Z]{2}[0-9]{2}[A-Z0-9]{9,13}$'))
+        || (type == 'passport' && number.matches('^[A-Z][0-9]{7}$'))
+      );
+    }
+
+    function validApplication(data) {
+      return data.keys().hasAll(['uid', 'name', 'mobile', 'age', 'area', 'languages', 'experience',
+                                 'services', 'indianCitizen', 'idType', 'idNumber', 'consent',
+                                 'status', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'name', 'mobile', 'age', 'area', 'languages', 'experience',
+                                'services', 'indianCitizen', 'idType', 'idNumber', 'consent',
+                                'status', 'createdAt'])
+        && data.uid == request.auth.uid
+        && data.status == 'pending'
+        && stampedNow(data)
+        && text(data.name, 1, 100)
+        && phone(data.mobile)
+        && data.age is int && data.age >= 18 && data.age <= 80
+        && text(data.area, 1, 100)
+        && text(data.languages, 0, 200)
+        && text(data.experience, 0, 2000)
+        && data.services is list && data.services.size() >= 1 && data.services.size() <= 10
+        && data.indianCitizen == true
+        && data.consent == true
+        && validId(data.idType, data.idNumber);
+    }
+
+    // Admins may change the status and nothing else, and only to a known value.
+    function statusChangeTo(allowed) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && request.resource.data.status in allowed;
+    }
+
+    // ---------- Booking progress ----------
+
+    // Set when a Saathi is assigned: who, how to reach them, and when the visit is.
+    function validAssignment(data) {
+      return text(data.get('assignedSaathiId', ''), 1, 128)
+        && text(data.get('assignedSaathiName', ''), 1, 100)
+        && phone(data.get('assignedSaathiPhone', ''))
+        && data.get('scheduledAt', null) is timestamp;
+    }
+
+    // A progress time may only be written as "now" by the server, never back- or forward-dated.
+    function stampedIfChanged(changed, key) {
+      return !changed.hasAny([key]) || request.resource.data[key] == request.time;
+    }
+
+    // Admins run the booking: assign a Saathi, start, complete or cancel. The customer's own
+    // details (name, phone, address, location, message, plan) can never be changed.
+    function adminUpdatesBooking() {
+      let data = request.resource.data;
+      let changed = data.diff(resource.data).affectedKeys();
+      return changed.hasOnly(['status', 'assignedSaathiId', 'assignedSaathiName', 'assignedSaathiPhone',
+                              'scheduledAt', 'assignedAt', 'startedAt', 'completedAt',
+                              'cancelledAt', 'cancelledBy', 'hours', 'planId', 'planName', 'planPrice',
+                              'extraHoursRequested', 'extraRequestedAt', 'extraDeclinedAt'])
+        // Hours and plan change only together and only to a consistent catalogue plan.
+        && (!changed.hasAny(['hours', 'planId', 'planName', 'planPrice']) || validPlan(data))
+        // Admins can clear an extra-time request but never invent one.
+        && (!changed.hasAny(['extraHoursRequested']) || !('extraHoursRequested' in data))
+        && (!changed.hasAny(['extraRequestedAt']) || !('extraRequestedAt' in data))
+        && stampedIfChanged(changed, 'extraDeclinedAt')
+        && data.status in ['new', 'assigned', 'started', 'completed', 'cancelled']
+        // Assigned, started and completed visits always name a Saathi with a number and a time.
+        && (data.status in ['new', 'cancelled'] || validAssignment(data))
+        && stampedIfChanged(changed, 'assignedAt')
+        && stampedIfChanged(changed, 'startedAt')
+        && stampedIfChanged(changed, 'completedAt')
+        && stampedIfChanged(changed, 'cancelledAt')
+        && (!changed.hasAny(['cancelledBy']) || data.cancelledBy == 'admin');
+    }
+
+    // A customer may cancel their own request, and only while no Saathi has been assigned.
+    function customerCancelsBooking() {
+      let data = request.resource.data;
+      return resource.data.uid == request.auth.uid
+        && resource.data.status == 'new'
+        && data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt', 'cancelledBy'])
+        && data.status == 'cancelled'
+        && data.cancelledAt == request.time
+        && data.cancelledBy == 'customer';
+    }
+
+    // A customer whose visit is confirmed or running may ask for more time, up to a whole day.
+    function customerRequestsMoreTime() {
+      let data = request.resource.data;
+      let old = resource.data;
+      return old.uid == request.auth.uid
+        && old.status in ['assigned', 'started']
+        && old.get('hours', null) is int
+        && data.diff(old).affectedKeys().hasOnly(['extraHoursRequested', 'extraRequestedAt'])
+        && data.extraHoursRequested is int
+        && data.extraHoursRequested >= 1
+        && old.hours + data.extraHoursRequested <= 12
+        && data.extraRequestedAt == request.time;
+    }
+
+    // Public profiles carry first name + initial, area, languages and services. No phone or ID.
+    function validProfile(data) {
+      return data.keys().hasAll(['name', 'area', 'languages', 'services', 'createdAt'])
+        && data.keys().hasOnly(['name', 'area', 'languages', 'services', 'createdAt'])
+        && text(data.name, 1, 100)
+        && text(data.area, 0, 100)
+        && text(data.languages, 0, 200)
+        && data.services is list && data.services.size() <= 10
+        && data.createdAt is timestamp;
+    }
+
+    // ---------- Collections ----------
 
     match /admins/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
@@ -33,27 +239,29 @@ service cloud.firestore {
 
     // Customer requests from the Contact page.
     match /bookings/{id} {
-      allow create: if ownsNew() && verifiedContact() && request.resource.data.status == 'new';
+      allow create: if signedIn() && verifiedContact() && validBooking(request.resource.data);
       allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
-      allow update: if isAdmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+      allow update: if (isAdmin() && adminUpdatesBooking())
+        || (signedIn() && customerCancelsBooking())
+        || (signedIn() && customerRequestsMoreTime());
       allow delete: if false;
     }
 
     // Applications from the Become a Saathi page.
     match /applications/{id} {
-      allow create: if ownsNew() && verifiedContact() && request.resource.data.status == 'pending';
+      allow create: if signedIn() && verifiedContact() && validApplication(request.resource.data);
       allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
-      allow update: if isAdmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+      allow update: if isAdmin() && statusChangeTo(['pending', 'verified', 'rejected']);
       allow delete: if false;
     }
 
     // Public profiles of verified Saathis, shown on the Our Saathis page.
-    // Admins publish them from the admin page; they hold no phone or ID details.
     match /saathis/{id} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update: if isAdmin() && validProfile(request.resource.data);
+      allow delete: if isAdmin();
     }
+
+    // Anything not listed above is closed by default.
   }
 }

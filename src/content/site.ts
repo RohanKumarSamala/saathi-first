@@ -165,6 +165,14 @@ export type Plan = {
   unit: string
   description: string
   includes: string[]
+  /**
+   * Companion plans cover up to this many hours; customers pick their hours and the
+   * smallest plan that covers them is used. Property Monitoring is per visit, so it has none.
+   * Keep in step with planHours / planPrices in firestore.rules.
+   */
+  hours?: number
+  /** Offered to customers as the "Whole day" option. */
+  wholeDay?: boolean
 }
 
 const companionServices = [
@@ -195,6 +203,7 @@ export const plans: Plan[] = [
     name: 'Quick Companion',
     price: '₹249',
     unit: 'up to 2 hrs',
+    hours: 2,
     description: 'Ideal for quick and reliable support when you need it.',
     includes: companionServices,
   },
@@ -203,6 +212,7 @@ export const plans: Plan[] = [
     name: 'Care Companion',
     price: '₹499',
     unit: 'up to 4 hrs',
+    hours: 4,
     description: 'Reliable companionship and assistance for your essential needs.',
     includes: companionServices,
   },
@@ -211,6 +221,7 @@ export const plans: Plan[] = [
     name: 'Day Companion',
     price: '₹999',
     unit: 'up to 8 hrs',
+    hours: 8,
     description: 'Dedicated companionship and assistance throughout the day.',
     includes: companionServices,
   },
@@ -219,6 +230,8 @@ export const plans: Plan[] = [
     name: 'Extended Companion',
     price: '₹1,299',
     unit: 'up to 12 hrs',
+    hours: 12,
+    wholeDay: true,
     description: 'Personalised companionship and support for a full day.',
     includes: companionServices,
   },

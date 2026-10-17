@@ -23,7 +23,6 @@ import {
   bookingStatuses,
   publishSaathi,
   setApplicationStatus,
-  setStatus,
   watchCollection,
   type Application,
   type Booking,
@@ -32,6 +31,9 @@ import {
 } from '../lib/db'
 import { auth } from '../lib/firebase'
 import { idTypes } from '../lib/identity'
+import { friendlyWhen } from '../lib/contact'
+import { hoursLabel } from '../lib/pricing'
+import { BookingAssignment } from './admin/BookingAssignment'
 
 type Tab = 'bookings' | 'applications'
 type Feed<T> = { rows: Stored<T>[] | null; error: string }
@@ -40,6 +42,7 @@ const statusTone: Record<string, string> = {
   new: 'bg-gold text-wine',
   pending: 'bg-gold text-wine',
   assigned: 'bg-rosewood text-white',
+  started: 'bg-burgundy text-blush',
   completed: 'bg-emerald-700 text-white',
   verified: 'bg-emerald-700 text-white',
   cancelled: 'bg-wine/15 text-ink-muted',
@@ -154,19 +157,27 @@ function Card({ name, date, status, children }: {
 const actionLink =
   'inline-flex items-center gap-2 rounded-full bg-burgundy/10 px-4 py-1.5 font-semibold text-burgundy transition-colors hover:bg-burgundy hover:text-blush'
 
-function BookingCard({ row }: { row: Stored<Booking> }) {
+const bookingStatusLabel: Record<string, string> = {
+  new: 'New request',
+  assigned: 'Saathi assigned',
+  started: 'Visit started',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+}
+
+/** Status changes go through the assignment panel's actions, so here it is only shown. */
+function BookingStatusBadge({ row }: { row: Stored<Booking> }) {
   return (
-    <Card
-      name={row.name}
-      date={formatDate(row)}
-      status={
-        <StatusSelect
-          value={row.status}
-          options={bookingStatuses}
-          onChange={(status) => void setStatus('bookings', row.id, status)}
-        />
-      }
-    >
+    <span className={`rounded-full px-5 py-2.5 text-sm font-semibold shadow-sm ${statusTone[row.status] ?? ''}`}>
+      {bookingStatusLabel[row.status] ?? row.status}
+      {row.status === 'cancelled' && row.cancelledBy === 'customer' && ' by customer'}
+    </span>
+  )
+}
+
+function BookingCard({ row, saathis }: { row: Stored<Booking>; saathis: Stored<Application>[] }) {
+  return (
+    <Card name={row.name} date={formatDate(row)} status={<BookingStatusBadge row={row} />}>
       <Detail label="Phone">
         <a href={`tel:${row.phone}`} className={actionLink}>
           <Phone aria-hidden className="size-4" />
@@ -174,7 +185,11 @@ function BookingCard({ row }: { row: Stored<Booking> }) {
         </a>
       </Detail>
       <Detail label="Service">{row.serviceName}</Detail>
-      <Detail label="Saathi">
+      <Detail label="Requested for">
+        {row.preferredStart &&
+          `${friendlyWhen(row.preferredStart.toDate())}${row.hours ? ` · ${hoursLabel(row.hours)}` : ''}`}
+      </Detail>
+      <Detail label="Customer asked for">
         {row.saathiName
           ? `${row.saathiName} (${row.saathiChoice === 'random' ? 'picked at random' : 'customer’s choice'})`
           : row.serviceName && 'Team to assign'}
@@ -197,6 +212,7 @@ function BookingCard({ row }: { row: Stored<Booking> }) {
       </Detail>
       <Detail label="Address" wide>{row.address}</Detail>
       <Detail label="Message" wide>{row.message}</Detail>
+      <BookingAssignment key={`${row.id}-${row.assignedAt?.toMillis() ?? 0}`} row={row} saathis={saathis} />
     </Card>
   )
 }
@@ -336,15 +352,17 @@ function Listing<T extends { name: string; status: string }>({ feed, statuses, e
   )
 }
 
-const bookingSearch = (row: Stored<Booking>) => `${row.name} ${row.phone} ${row.serviceName ?? ''} ${row.saathiName ?? ''} ${row.planName} ${row.address}`
+const bookingSearch = (row: Stored<Booking>) =>
+  `${row.name} ${row.phone} ${row.serviceName ?? ''} ${row.saathiName ?? ''} ${row.assignedSaathiName ?? ''} ${row.planName} ${row.address}`
 const applicationSearch = (row: Stored<Application>) => `${row.name} ${row.mobile} ${row.area} ${row.languages}`
-const renderBooking = (row: Stored<Booking>) => <BookingCard key={row.id} row={row} />
 
 function Dashboard() {
   const [tab, setTab] = useState<Tab>('bookings')
   const bookings = useFeed<Booking>('bookings')
   const applications = useFeed<Application>('applications')
   const saathis = useFeed<Saathi>('saathis')
+  const verified = (applications.rows ?? []).filter((row) => row.status === 'verified')
+  const renderBooking = (row: Stored<Booking>) => <BookingCard key={row.id} row={row} saathis={verified} />
   const renderApplication = (row: Stored<Application>) => (
     <ApplicationCard key={row.id} row={row} saathi={saathis.rows?.find((saathi) => saathi.id === row.id)} />
   )
@@ -360,7 +378,7 @@ function Dashboard() {
     <>
       <div className="mb-12 grid gap-5 sm:grid-cols-2 nav:grid-cols-4">
         <Stat icon={ClipboardList} label="New requests" value={count(bookings, 'new')} highlight />
-        <Stat icon={CalendarClock} label="Requests in total" value={count(bookings)} />
+        <Stat icon={CalendarClock} label="Visits to run" value={count(bookings, 'assigned')} />
         <Stat icon={UserRoundPlus} label="Awaiting verification" value={count(applications, 'pending')} />
         <Stat icon={ShieldCheck} label="Verified Saathis" value={count(applications, 'verified')} />
       </div>

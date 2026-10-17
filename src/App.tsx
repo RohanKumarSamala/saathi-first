@@ -8,6 +8,7 @@ import BecomeSaathi from './pages/BecomeSaathi'
 import Contact from './pages/Contact'
 import Home from './pages/Home'
 import HowItWorks from './pages/HowItWorks'
+import MyBookings from './pages/MyBookings'
 import NotFound from './pages/NotFound'
 import Plans from './pages/Plans'
 import Policy from './pages/Policy'
@@ -71,6 +72,7 @@ export default function App() {
           <Route path="become-a-saathi" element={<BecomeSaathi />} />
           <Route path="contact" element={<Contact />} />
           <Route path="contact/:serviceId" element={<Contact />} />
+          <Route path="bookings" element={<MyBookings />} />
           <Route path="policies/:slug" element={<Policy />} />
           <Route path="auth/action" element={<AuthAction />} />
           <Route path="*" element={<NotFound />} />
