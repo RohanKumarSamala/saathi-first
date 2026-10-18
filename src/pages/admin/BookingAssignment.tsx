@@ -1,7 +1,7 @@
-import { CalendarClock, CircleCheck, Hourglass, MessageCircle, Play, UserRoundCheck, XCircle } from 'lucide-react'
+import { Check, CircleCheck, Hourglass, MapPin, MessageCircle, Phone, Play, UserRoundCheck, X, XCircle } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { services } from '../../content/site'
-import { friendlyWhen, whatsappLink } from '../../lib/contact'
+import { callLink, friendlyWhen, whatsappLink } from '../../lib/contact'
 import { hoursLabel, planForHours } from '../../lib/pricing'
 import {
   approveMoreTime,
@@ -24,10 +24,11 @@ function toInputValue(date: Date) {
 }
 
 const fieldClass =
-  'w-full rounded-2xl border border-burgundy/20 bg-white px-4 py-3 font-medium text-ink focus-visible:border-burgundy focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/30'
-const labelClass = 'mb-1.5 block text-sm font-semibold text-ink-muted'
-const smallButton =
-  'inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition-colors duration-300 disabled:pointer-events-none disabled:opacity-50'
+  'h-10 w-full min-w-0 rounded-xl border border-burgundy/20 bg-white px-3 text-sm font-medium text-ink focus-visible:border-burgundy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40'
+const iconAction =
+  'grid size-9 shrink-0 place-items-center rounded-full bg-burgundy/10 text-burgundy transition-colors hover:bg-burgundy hover:text-blush'
+const mainAction =
+  'inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-colors disabled:pointer-events-none disabled:opacity-50'
 
 /**
  * Admin controls for one booking: assign a verified Saathi with a visit time and the
@@ -45,7 +46,7 @@ export function BookingAssignment({ row, saathis }: { row: Stored<Booking>; saat
   // Start from the time the customer asked for; the admin can move it after calling them.
   const requested = row.scheduledAt ?? row.preferredStart
   const [when, setWhen] = useState(requested ? toInputValue(requested.toDate()) : '')
-  const [editing, setEditing] = useState(!row.assignedSaathiId)
+  const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -74,8 +75,8 @@ export function BookingAssignment({ row, saathis }: { row: Stored<Booking>; saat
     const picked = saathis.find((s) => s.id === saathiId)
     const scheduledAt = new Date(when)
     if (!picked) return setError('Choose a verified Saathi.')
-    if (!isValidIndianMobile(phone)) return setError('Enter a valid 10-digit WhatsApp number for the Saathi.')
-    if (!when || Number.isNaN(scheduledAt.getTime())) return setError('Choose the date and time of the visit.')
+    if (!isValidIndianMobile(phone)) return setError('Enter a valid 10-digit WhatsApp number.')
+    if (!when || Number.isNaN(scheduledAt.getTime())) return setError('Choose the visit date and time.')
     const saved = await run(() =>
       assignSaathi(row.id, { saathiId: picked.id, name: publicName(picked.name), phone, scheduledAt }),
     )
@@ -93,125 +94,134 @@ export function BookingAssignment({ row, saathis }: { row: Stored<Booking>; saat
     ? `Hello ${row.name}, this is Saathi First about your ${service} on ${friendlyWhen(row.scheduledAt.toDate())}.`
     : `Hello ${row.name}, this is Saathi First about your ${service} request.`
   const open = row.status === 'new' || row.status === 'assigned'
+  const active = open || row.status === 'started'
 
   return (
-    <div className="mt-2 rounded-3xl bg-blush/60 p-5 ring-1 ring-gold/30 sm:col-span-2 nav:col-span-3 nav:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-eyebrow flex items-center gap-2 font-semibold text-rosewood">
-          <UserRoundCheck aria-hidden className="size-4" />
-          Assigned Saathi
+    <>
+      {row.assignedSaathiName && (
+        <p className="flex items-start gap-2 rounded-xl bg-blush/70 px-3 py-2 text-sm">
+          <UserRoundCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-rosewood" />
+          <span className="sr-only">Assigned Saathi: </span>
+          <span>
+            <strong className="font-semibold">{row.assignedSaathiName}</strong> · {row.assignedSaathiPhone}
+            {row.scheduledAt && <span className="block text-ink-muted">{friendlyWhen(row.scheduledAt.toDate())}</span>}
+          </span>
         </p>
-        <a
-          href={whatsappLink(row.phone, customerMessage)}
-          target="_blank"
-          rel="noreferrer"
-          className={`${smallButton} bg-[#1f7a46] text-white hover:bg-[#17653a]`}
-        >
-          <MessageCircle aria-hidden className="size-4" />
-          WhatsApp customer
-        </a>
-      </div>
-
-      {row.assignedSaathiId && !editing && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <p className="text-lg font-semibold">
-              {row.assignedSaathiName} · {row.assignedSaathiPhone}
-            </p>
-            {row.scheduledAt && (
-              <p className="flex items-center gap-1.5 text-ink-muted">
-                <CalendarClock aria-hidden className="size-4" />
-                {friendlyWhen(row.scheduledAt.toDate())}
-              </p>
-            )}
-          </div>
-          {open && (
-            <button type="button" onClick={() => setEditing(true)} className={`${smallButton} bg-white text-burgundy ring-1 ring-burgundy/20 hover:bg-burgundy/10`}>
-              Change Saathi or time
-            </button>
-          )}
-        </div>
-      )}
-
-      {open && editing && (
-        <form noValidate onSubmit={onAssign} className="mt-4 grid gap-4 nav:grid-cols-[1.4fr_1fr_1fr_auto] nav:items-end">
-          <div>
-            <label htmlFor={`saathi-${row.id}`} className={labelClass}>
-              Saathi
-            </label>
-            <select id={`saathi-${row.id}`} value={saathiId} onChange={(event) => chooseSaathi(event.target.value)} className={fieldClass}>
-              <option value="">Choose a verified Saathi…</option>
-              {ordered.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} · {s.area}
-                  {(s.services ?? []).includes(row.serviceId ?? '') ? ' · offers this service' : ''}
-                  {s.id === row.saathiId ? ' · customer’s choice' : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor={`phone-${row.id}`} className={labelClass}>
-              WhatsApp number
-            </label>
-            <input id={`phone-${row.id}`} value={phone} onChange={(event) => setPhone(event.target.value)} type="tel" inputMode="tel" className={fieldClass} />
-          </div>
-          <div>
-            <label htmlFor={`when-${row.id}`} className={labelClass}>
-              Visit date and time
-            </label>
-            <input id={`when-${row.id}`} value={when} onChange={(event) => setWhen(event.target.value)} type="datetime-local" className={fieldClass} />
-          </div>
-          <div className="flex gap-2">
-            <button type="submit" disabled={busy} className={`${smallButton} bg-burgundy py-3.5 text-blush hover:bg-wine`}>
-              {row.assignedSaathiId ? 'Save' : 'Assign'}
-            </button>
-            {row.assignedSaathiId && (
-              <button type="button" onClick={() => setEditing(false)} className={`${smallButton} py-3.5 text-burgundy hover:bg-burgundy/10`}>
-                Keep
-              </button>
-            )}
-          </div>
-          {saathis.length === 0 && (
-            <p className="text-sm text-ink-muted nav:col-span-4">
-              No verified Saathis yet. Verify an applicant on the Saathi applications tab first.
-            </p>
-          )}
-        </form>
-      )}
-
-      {(row.status === 'cancelled' || row.status === 'completed') && !row.assignedSaathiId && (
-        <p className="mt-2 text-ink-muted">No Saathi was assigned.</p>
       )}
 
       {row.extraHoursRequested && (row.status === 'assigned' || row.status === 'started') && (
         <ExtraTimeRequest row={row} busy={busy} run={run} />
       )}
 
-      <div className="mt-5 flex flex-wrap gap-2">
-        {row.status === 'assigned' && (
-          <button type="button" disabled={busy} onClick={() => void run(() => markStarted(row.id))} className={`${smallButton} bg-rosewood text-white hover:bg-burgundy`}>
-            <Play aria-hidden className="size-4" />
-            Mark visit started
-          </button>
+      {open && editing && (
+        <form noValidate onSubmit={onAssign} className="grid gap-2 rounded-xl bg-blush/70 p-3">
+          <select
+            aria-label="Saathi"
+            value={saathiId}
+            onChange={(event) => chooseSaathi(event.target.value)}
+            className={fieldClass}
+          >
+            <option value="">{saathis.length ? 'Choose a Saathi…' : 'No verified Saathis yet'}</option>
+            {ordered.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} · {s.area}
+                {(s.services ?? []).includes(row.serviceId ?? '') ? ' ✓' : ''}
+                {s.id === row.saathiId ? ' (asked for)' : ''}
+              </option>
+            ))}
+          </select>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              aria-label="Saathi WhatsApp number"
+              placeholder="WhatsApp number"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              type="tel"
+              inputMode="tel"
+              className={fieldClass}
+            />
+            <input
+              aria-label="Visit date and time"
+              value={when}
+              onChange={(event) => setWhen(event.target.value)}
+              type="datetime-local"
+              className={fieldClass}
+            />
+          </div>
+          <div className="flex gap-2">
+            <button type="submit" disabled={busy} className={`${mainAction} bg-burgundy text-blush hover:bg-wine`}>
+              <Check aria-hidden className="size-4" />
+              {row.assignedSaathiId ? 'Save' : 'Assign'}
+            </button>
+            <button type="button" onClick={() => setEditing(false)} className={`${mainAction} text-ink-muted hover:bg-wine/10`}>
+              Close
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div className="mt-auto flex items-center gap-2 border-t border-burgundy/10 pt-3">
+        <a href={callLink(row.phone)} title={`Call ${row.phone}`} aria-label={`Call ${row.name}`} className={iconAction}>
+          <Phone aria-hidden className="size-4" />
+        </a>
+        <a
+          href={whatsappLink(row.phone, customerMessage)}
+          target="_blank"
+          rel="noreferrer"
+          title="WhatsApp customer"
+          aria-label={`WhatsApp ${row.name}`}
+          className={`${iconAction} bg-[#1f7a46]/10 text-[#1f7a46] hover:bg-[#1f7a46] hover:text-white`}
+        >
+          <MessageCircle aria-hidden className="size-4" />
+        </a>
+        {row.location && (
+          <a
+            href={`https://www.google.com/maps?q=${row.location.lat},${row.location.lng}`}
+            target="_blank"
+            rel="noreferrer"
+            title={`Open location in Maps (±${row.location.accuracy} m)`}
+            aria-label="Open location in Maps"
+            className={iconAction}
+          >
+            <MapPin aria-hidden className="size-4" />
+          </a>
         )}
-        {row.status === 'started' && (
-          <button type="button" disabled={busy} onClick={() => void run(() => markCompleted(row.id))} className={`${smallButton} bg-emerald-700 text-white hover:bg-emerald-800`}>
-            <CircleCheck aria-hidden className="size-4" />
-            Mark completed
-          </button>
-        )}
-        {row.status !== 'completed' && row.status !== 'cancelled' && (
-          <button type="button" disabled={busy} onClick={onCancel} className={`${smallButton} text-ink-muted hover:bg-wine/10 hover:text-wine`}>
-            <XCircle aria-hidden className="size-4" />
-            Cancel booking
-          </button>
-        )}
+
+        <span className="ml-auto flex items-center gap-1.5">
+          {open && !editing && (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className={`${mainAction} ${row.assignedSaathiId ? 'text-burgundy ring-1 ring-burgundy/20 hover:bg-burgundy/10' : 'bg-burgundy text-blush hover:bg-wine'}`}
+            >
+              {row.assignedSaathiId ? 'Change' : 'Assign'}
+            </button>
+          )}
+          {row.status === 'assigned' && !editing && (
+            <button type="button" disabled={busy} onClick={() => void run(() => markStarted(row.id))} className={`${mainAction} bg-burgundy text-blush hover:bg-wine`}>
+              <Play aria-hidden className="size-3.5" />
+              Start
+            </button>
+          )}
+          {row.status === 'started' && (
+            <button type="button" disabled={busy} onClick={() => void run(() => markCompleted(row.id))} className={`${mainAction} bg-emerald-700 text-white hover:bg-emerald-800`}>
+              <CircleCheck aria-hidden className="size-4" />
+              Complete
+            </button>
+          )}
+          {active && (
+            <button type="button" disabled={busy} onClick={onCancel} title="Cancel booking" aria-label="Cancel booking" className={`${iconAction} bg-transparent text-ink-muted hover:bg-wine/10 hover:text-wine`}>
+              <XCircle aria-hidden className="size-[1.125rem]" />
+            </button>
+          )}
+        </span>
       </div>
-      <p role="status" className="mt-2 min-h-5 text-sm text-[#b3261e]">
-        {error}
-      </p>
-    </div>
+      {error && (
+        <p role="status" className="-mt-1 text-xs text-[#b3261e]">
+          {error}
+        </p>
+      )}
+    </>
   )
 }
 
@@ -225,35 +235,32 @@ function ExtraTimeRequest({ row, busy, run }: {
   const total = (row.hours ?? 0) + extra
   const plan = planForHours(total)
   return (
-    <div role="status" className="mt-5 rounded-2xl bg-gold/20 p-4 ring-1 ring-gold/50">
-      <p className="flex items-center gap-2 font-semibold">
-        <Hourglass aria-hidden className="size-5 text-burgundy" />
-        Customer asked for {extra} more hour{extra === 1 ? '' : 's'}
-      </p>
-      <p className="mt-1 text-ink-muted">
-        New total {hoursLabel(total).toLowerCase()}
-        {plan && ` · ${plan.name} ${plan.price}`}
-        {row.planName && plan && plan.name !== row.planName && ` (was ${row.planName})`}. Check with the Saathi first.
-      </p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          disabled={busy || !plan}
-          onClick={() => void run(() => approveMoreTime(row))}
-          className="inline-flex items-center gap-2 rounded-full bg-burgundy px-5 py-2.5 text-sm font-semibold text-blush transition-colors hover:bg-wine disabled:opacity-50"
-        >
-          <CircleCheck aria-hidden className="size-4" />
-          Approve extra time
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void run(() => declineMoreTime(row.id))}
-          className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-ink-muted transition-colors hover:bg-wine/10 hover:text-wine"
-        >
-          Decline
-        </button>
-      </div>
+    <div role="status" className="flex items-center gap-2 rounded-xl bg-gold/25 px-3 py-2 text-sm">
+      <Hourglass aria-hidden className="size-4 shrink-0 text-burgundy" />
+      <span className="grow">
+        <strong>+{extra} hr{extra === 1 ? '' : 's'}</strong> asked · {hoursLabel(total).toLowerCase()}
+        {plan && `, ${plan.price}`}
+      </span>
+      <button
+        type="button"
+        disabled={busy || !plan}
+        onClick={() => void run(() => approveMoreTime(row))}
+        title="Approve extra time"
+        aria-label="Approve extra time"
+        className="grid size-8 place-items-center rounded-full bg-burgundy text-blush transition-colors hover:bg-wine disabled:opacity-50"
+      >
+        <Check aria-hidden className="size-4" />
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => void run(() => declineMoreTime(row.id))}
+        title="Decline extra time"
+        aria-label="Decline extra time"
+        className="grid size-8 place-items-center rounded-full text-ink-muted transition-colors hover:bg-wine/10 hover:text-wine"
+      >
+        <X aria-hidden className="size-4" />
+      </button>
     </div>
   )
 }

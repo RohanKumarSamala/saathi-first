@@ -35,17 +35,10 @@ function Track({ hidden = false }: { hidden?: boolean }) {
   )
 }
 
-/** Sits at the foot of the hero in place of the reference's brand-logo strip. */
+/** A slim band of services that drifts across under the hero. Hover pauses it. */
 export function TrustMarquee() {
   return (
-    <section aria-labelledby="trust-heading" className="py-14 nav:py-20">
-      <div className="page-padding">
-        <div className="container-large">
-          <h2 id="trust-heading" className="text-subheading mb-10 nav:mb-12">
-            One trusted Saathi for every everyday need
-          </h2>
-        </div>
-      </div>
+    <section aria-label="Our services" className="overflow-hidden bg-wine py-5 text-blush nav:py-6">
       <div className="flex w-max animate-marquee hover:[animation-play-state:paused] motion-reduce:animate-none">
         <Track />
         <Track hidden />

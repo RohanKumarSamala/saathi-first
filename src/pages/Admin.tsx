@@ -1,13 +1,19 @@
 import {
+  Briefcase,
   CalendarClock,
   ClipboardList,
   ExternalLink,
+  IdCard,
   KeyRound,
+  Languages,
   LogOut,
   MapPin,
+  MessageCircle,
+  MessageSquareText,
   Phone,
   Search,
   ShieldCheck,
+  UserRound,
   UserRoundPlus,
   type LucideIcon,
 } from 'lucide-react'
@@ -31,23 +37,12 @@ import {
 } from '../lib/db'
 import { auth } from '../lib/firebase'
 import { idTypes } from '../lib/identity'
-import { friendlyWhen } from '../lib/contact'
+import { callLink, friendlyWhen, whatsappLink } from '../lib/contact'
 import { hoursLabel } from '../lib/pricing'
 import { BookingAssignment } from './admin/BookingAssignment'
 
 type Tab = 'bookings' | 'applications'
 type Feed<T> = { rows: Stored<T>[] | null; error: string }
-
-const statusTone: Record<string, string> = {
-  new: 'bg-gold text-wine',
-  pending: 'bg-gold text-wine',
-  assigned: 'bg-rosewood text-white',
-  started: 'bg-burgundy text-blush',
-  completed: 'bg-emerald-700 text-white',
-  verified: 'bg-emerald-700 text-white',
-  cancelled: 'bg-wine/15 text-ink-muted',
-  rejected: 'bg-wine/15 text-ink-muted',
-}
 
 const formatDate = (row: Stored<unknown>) =>
   row.createdAt
@@ -77,21 +72,33 @@ function Stat({ icon: Icon, label, value, highlight }: {
 }) {
   return (
     <div
-      className={`relative isolate overflow-hidden rounded-card p-6 shadow-card nav:p-7 ${
-        highlight
-          ? 'bg-[linear-gradient(135deg,#6b1e2e,#8f2f42_60%,#b9545c)] text-blush'
-          : 'bg-white/90 ring-1 ring-gold/30'
+      className={`flex items-center gap-3 rounded-2xl px-4 py-3 ${
+        highlight ? 'bg-burgundy text-blush' : 'bg-white/90 ring-1 ring-gold/25'
       }`}
     >
-      <div aria-hidden className={`absolute -right-10 -top-10 -z-10 size-36 rounded-full border ${highlight ? 'border-gold/40' : 'border-gold/50'}`} />
-      <span className={`grid size-12 place-items-center rounded-2xl ${highlight ? 'bg-blush/15 text-gold' : 'bg-burgundy/10 text-burgundy'}`}>
-        <Icon aria-hidden className="size-6" strokeWidth={1.6} />
+      <span className={`grid size-9 shrink-0 place-items-center rounded-xl ${highlight ? 'bg-blush/15 text-gold' : 'bg-burgundy/10 text-burgundy'}`}>
+        <Icon aria-hidden className="size-[1.125rem]" strokeWidth={1.8} />
       </span>
-      <p className="mt-5 text-5xl font-light tracking-tight">{value ?? '–'}</p>
-      <p className={`text-eyebrow mt-1 font-semibold ${highlight ? 'text-blush/80' : 'text-ink-muted'}`}>{label}</p>
+      <p className="flex items-baseline gap-2">
+        <span className="text-2xl font-semibold leading-none">{value ?? '–'}</span>
+        <span className={`text-sm ${highlight ? 'text-blush/80' : 'text-ink-muted'}`}>{label}</span>
+      </p>
     </div>
   )
 }
+
+const statusTone: Record<string, string> = {
+  new: 'bg-gold/30 text-wine',
+  pending: 'bg-gold/30 text-wine',
+  assigned: 'bg-rosewood/15 text-burgundy',
+  started: 'bg-burgundy text-blush',
+  completed: 'bg-emerald-100 text-emerald-800',
+  verified: 'bg-emerald-100 text-emerald-800',
+  cancelled: 'bg-wine/10 text-ink-muted',
+  rejected: 'bg-wine/10 text-ink-muted',
+}
+
+const pillClass = 'shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold capitalize'
 
 function StatusSelect({ value, options, onChange }: {
   value: string
@@ -99,30 +106,33 @@ function StatusSelect({ value, options, onChange }: {
   onChange: (status: string) => void
 }) {
   return (
-    <label>
-      <span className="sr-only">Status</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className={`cursor-pointer rounded-full px-5 py-2.5 text-sm font-semibold capitalize shadow-sm ${statusTone[value] ?? ''}`}
-      >
-        {options.map((option) => (
-          <option key={option} value={option} className="bg-white text-ink">
-            {option}
-          </option>
-        ))}
-      </select>
-    </label>
+    <select
+      aria-label="Status"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className={`${pillClass} cursor-pointer ${statusTone[value] ?? ''}`}
+    >
+      {options.map((option) => (
+        <option key={option} value={option} className="bg-white text-ink">
+          {option}
+        </option>
+      ))}
+    </select>
   )
 }
 
-function Detail({ label, wide, children }: { label: string; wide?: boolean; children: ReactNode }) {
+/**
+ * One detail on one line behind an icon, with no visible heading. The label is still
+ * read out to screen readers so the card stays understandable without sight.
+ */
+function Line({ icon: Icon, label, children }: { icon: LucideIcon; label: string; children: ReactNode }) {
   if (!children) return null
   return (
-    <div className={wide ? 'sm:col-span-2 nav:col-span-3' : ''}>
-      <dt className="text-eyebrow text-[0.6875rem] font-semibold text-rosewood">{label}</dt>
-      <dd className="mt-0.5 font-medium [overflow-wrap:anywhere]">{children}</dd>
-    </div>
+    <p className="flex items-start gap-2 text-sm">
+      <Icon aria-hidden className="mt-0.5 size-4 shrink-0 text-rosewood" />
+      <span className="sr-only">{label}: </span>
+      <span className="min-w-0 [overflow-wrap:anywhere]">{children}</span>
+    </p>
   )
 }
 
@@ -133,85 +143,74 @@ function Card({ name, date, status, children }: {
   children: ReactNode
 }) {
   return (
-    <li className="overflow-hidden rounded-card bg-white/90 shadow-card ring-1 ring-gold/25 transition-transform duration-500 ease-out-soft hover:-translate-y-1">
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-burgundy/10 bg-blush/60 px-6 py-5 nav:px-8">
-        <div className="flex items-center gap-4">
-          <span className="grid size-14 shrink-0 place-items-center rounded-2xl bg-burgundy text-lg font-semibold text-blush">
-            {initials(name) || '?'}
-          </span>
-          <div>
-            <h3 className="text-xl font-semibold tracking-tight">{name}</h3>
-            <p className="flex items-center gap-1.5 text-sm text-ink-muted">
-              <CalendarClock aria-hidden className="size-4" />
-              {date}
-            </p>
-          </div>
+    <li className="flex min-w-0 flex-col gap-3 rounded-2xl bg-white/90 p-4 shadow-[0_10px_30px_-20px_rgb(58_17_25/0.45)] ring-1 ring-gold/25">
+      <div className="flex items-center gap-3">
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-burgundy text-sm font-semibold text-blush">
+          {initials(name) || '?'}
+        </span>
+        <div className="min-w-0 grow">
+          <h3 className="truncate font-semibold leading-tight">{name}</h3>
+          <p className="text-xs text-ink-muted">{date}</p>
         </div>
         {status}
       </div>
-      <dl className="grid gap-x-8 gap-y-5 px-6 py-6 sm:grid-cols-2 nav:grid-cols-3 nav:px-8">{children}</dl>
+      {children}
     </li>
   )
 }
 
-const actionLink =
-  'inline-flex items-center gap-2 rounded-full bg-burgundy/10 px-4 py-1.5 font-semibold text-burgundy transition-colors hover:bg-burgundy hover:text-blush'
+/** Round icon-only link or button for quick actions; the name shows on hover and to screen readers. */
+const iconAction =
+  'grid size-9 shrink-0 place-items-center rounded-full bg-burgundy/10 text-burgundy transition-colors hover:bg-burgundy hover:text-blush'
 
 const bookingStatusLabel: Record<string, string> = {
-  new: 'New request',
-  assigned: 'Saathi assigned',
-  started: 'Visit started',
-  completed: 'Completed',
+  new: 'New',
+  assigned: 'Assigned',
+  started: 'Started',
+  completed: 'Done',
   cancelled: 'Cancelled',
 }
 
-/** Status changes go through the assignment panel's actions, so here it is only shown. */
-function BookingStatusBadge({ row }: { row: Stored<Booking> }) {
-  return (
-    <span className={`rounded-full px-5 py-2.5 text-sm font-semibold shadow-sm ${statusTone[row.status] ?? ''}`}>
-      {bookingStatusLabel[row.status] ?? row.status}
-      {row.status === 'cancelled' && row.cancelledBy === 'customer' && ' by customer'}
-    </span>
-  )
-}
-
 function BookingCard({ row, saathis }: { row: Stored<Booking>; saathis: Stored<Application>[] }) {
+  const asked = row.saathiName
+    ? `Asked for ${row.saathiName}${row.saathiChoice === 'random' ? ' (random)' : ''}`
+    : ''
   return (
-    <Card name={row.name} date={formatDate(row)} status={<BookingStatusBadge row={row} />}>
-      <Detail label="Phone">
-        <a href={`tel:${row.phone}`} className={actionLink}>
-          <Phone aria-hidden className="size-4" />
-          {row.phone}
-        </a>
-      </Detail>
-      <Detail label="Service">{row.serviceName}</Detail>
-      <Detail label="Requested for">
-        {row.preferredStart &&
-          `${friendlyWhen(row.preferredStart.toDate())}${row.hours ? ` · ${hoursLabel(row.hours)}` : ''}`}
-      </Detail>
-      <Detail label="Customer asked for">
-        {row.saathiName
-          ? `${row.saathiName} (${row.saathiChoice === 'random' ? 'picked at random' : 'customer’s choice'})`
-          : row.serviceName && 'Team to assign'}
-      </Detail>
-      <Detail label="Plan">{row.planName ? `${row.planName} (${row.planPrice})` : 'Not chosen'}</Detail>
-      <Detail label="Location">
-        {row.location ? (
-          <a
-            href={`https://www.google.com/maps?q=${row.location.lat},${row.location.lng}`}
-            target="_blank"
-            rel="noreferrer"
-            className={actionLink}
-          >
-            <MapPin aria-hidden className="size-4" />
-            Open in Maps (±{row.location.accuracy} m)
-          </a>
-        ) : (
-          'Not shared'
-        )}
-      </Detail>
-      <Detail label="Address" wide>{row.address}</Detail>
-      <Detail label="Message" wide>{row.message}</Detail>
+    <Card
+      name={row.name}
+      date={formatDate(row)}
+      status={
+        <span
+          title={row.status === 'cancelled' && row.cancelledBy === 'customer' ? 'Cancelled by the customer' : undefined}
+          className={`${pillClass} ${statusTone[row.status] ?? ''}`}
+        >
+          {bookingStatusLabel[row.status] ?? row.status}
+        </span>
+      }
+    >
+      <div className="grid gap-1.5">
+        <Line icon={ClipboardList} label="Service">
+          {[row.serviceName, row.hours ? hoursLabel(row.hours) : '', row.planName && row.planPrice.split(' / ')[0]]
+            .filter(Boolean)
+            .join(' · ')}
+        </Line>
+        <Line icon={CalendarClock} label="Requested for">
+          {row.preferredStart && friendlyWhen(row.preferredStart.toDate())}
+        </Line>
+        <Line icon={MapPin} label="Address">
+          {row.address || (row.location ? 'Location shared' : '')}
+        </Line>
+        <Line icon={MessageSquareText} label="Message">
+          {row.message && (
+            <span className="line-clamp-2" title={row.message}>
+              {row.message}
+            </span>
+          )}
+        </Line>
+        <Line icon={UserRound} label="Saathi preference">
+          {!row.assignedSaathiName && asked}
+        </Line>
+      </div>
       <BookingAssignment key={`${row.id}-${row.assignedAt?.toMillis() ?? 0}`} row={row} saathis={saathis} />
     </Card>
   )
@@ -220,67 +219,96 @@ function BookingCard({ row, saathis }: { row: Stored<Booking>; saathis: Stored<A
 /** `saathi` is the applicant's public profile, present once they are verified. */
 function ApplicationCard({ row, saathi }: { row: Stored<Application>; saathi?: Stored<Saathi> }) {
   const offered = saathi?.services ?? row.services ?? []
+  const verified = row.status === 'verified'
+  // Verified Saathis show only their services; Edit reveals every service to toggle.
+  const [editingServices, setEditingServices] = useState(false)
   const toggle = (id: string) =>
     void publishSaathi(row, offered.includes(id) ? offered.filter((item) => item !== id) : [...offered, id])
+  const idLabel = idTypes.find((item) => item.id === row.idType)?.label ?? 'ID'
 
   return (
     <Card
       name={row.name}
       date={formatDate(row)}
       status={
-        <StatusSelect
-          value={row.status}
-          options={applicationStatuses}
-          onChange={(status) => void setApplicationStatus(row, status)}
-        />
+        <StatusSelect value={row.status} options={applicationStatuses} onChange={(status) => void setApplicationStatus(row, status)} />
       }
     >
-      <Detail label="Mobile">
-        <a href={`tel:${row.mobile}`} className={actionLink}>
-          <Phone aria-hidden className="size-4" />
-          {row.mobile}
-        </a>
-      </Detail>
-      <Detail label="Age">{row.age}</Detail>
-      <Detail label="Area">{row.area}</Detail>
-      <Detail label="Indian citizen">{row.indianCitizen ? 'Yes (self-declared)' : 'No'}</Detail>
-      <Detail label={idTypes.find((item) => item.id === row.idType)?.label ?? 'ID'}>{row.idNumber}</Detail>
-      <Detail label="Verification consent">{row.consent ? 'Given' : 'Not given'}</Detail>
-      <Detail label="Languages" wide>{row.languages}</Detail>
-      <Detail label="Experience / skills" wide>{row.experience}</Detail>
-      <Detail label={row.status === 'verified' ? 'Listed on Our Saathis for' : 'Services offered'} wide>
-        {row.status === 'verified' ? (
-          <span className="mt-1.5 flex flex-wrap gap-2">
-            {services.map((service) => (
+      <div className="grid gap-1.5">
+        <Line icon={MapPin} label="Area and age">
+          {row.area} · {row.age} yrs
+        </Line>
+        <Line icon={Languages} label="Languages">
+          {row.languages}
+        </Line>
+        <Line icon={IdCard} label="Identity">
+          {idLabel} {row.idNumber}
+          {row.indianCitizen && row.consent ? ' · Indian, consented' : ' · check declarations'}
+        </Line>
+        <Line icon={Briefcase} label="Experience">
+          {row.experience && (
+            <span className="line-clamp-2" title={row.experience}>
+              {row.experience}
+            </span>
+          )}
+        </Line>
+      </div>
+      <div className="flex flex-wrap gap-1.5" aria-label={verified ? 'Listed for services' : 'Services offered'}>
+        {services
+          .filter((service) => (verified && editingServices) || offered.includes(service.id))
+          .map((service) =>
+            verified && editingServices ? (
               <button
                 key={service.id}
                 type="button"
                 aria-pressed={offered.includes(service.id)}
                 onClick={() => toggle(service.id)}
-                className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors duration-300 ${
-                  offered.includes(service.id)
-                    ? 'bg-burgundy text-blush'
-                    : 'bg-white/80 text-burgundy ring-1 ring-burgundy/15 hover:bg-burgundy/10'
+                className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
+                  offered.includes(service.id) ? 'bg-burgundy text-blush' : 'bg-burgundy/[0.06] text-burgundy hover:bg-burgundy/15'
                 }`}
               >
                 {service.name}
               </button>
-            ))}
-          </span>
-        ) : (
-          services
-            .filter((service) => offered.includes(service.id))
-            .map((service) => service.name)
-            .join(', ') || 'Not specified'
+            ) : (
+              <span key={service.id} className="rounded-full bg-burgundy/[0.06] px-2.5 py-1 text-xs font-semibold text-burgundy">
+                {service.name}
+              </span>
+            ),
+          )}
+        {verified && (
+          <button
+            type="button"
+            aria-expanded={editingServices}
+            onClick={() => setEditingServices((value) => !value)}
+            className="rounded-full px-2.5 py-1 text-xs font-semibold text-rosewood underline underline-offset-2 hover:text-burgundy"
+          >
+            {editingServices ? 'Done' : 'Edit'}
+          </button>
         )}
-      </Detail>
+      </div>
+      <div className="mt-auto flex gap-2 border-t border-burgundy/10 pt-3">
+        <a href={callLink(row.mobile)} title={`Call ${row.mobile}`} aria-label={`Call ${row.mobile}`} className={iconAction}>
+          <Phone aria-hidden className="size-4" />
+        </a>
+        <a
+          href={whatsappLink(row.mobile, `Hello ${row.name}, this is Saathi First about your Saathi application.`)}
+          target="_blank"
+          rel="noreferrer"
+          title="WhatsApp"
+          aria-label={`WhatsApp ${row.name}`}
+          className={`${iconAction} bg-[#1f7a46]/10 text-[#1f7a46] hover:bg-[#1f7a46] hover:text-white`}
+        >
+          <MessageCircle aria-hidden className="size-4" />
+        </a>
+        <span className="ml-auto self-center text-sm text-ink-muted">{row.mobile}</span>
+      </div>
     </Card>
   )
 }
 
 function Notice({ children }: { children: ReactNode }) {
   return (
-    <p role="status" className="rounded-card bg-white/90 p-10 text-center text-lg font-medium shadow-card ring-1 ring-gold/25">
+    <p role="status" className="rounded-2xl bg-white/90 p-6 text-center font-medium ring-1 ring-gold/25">
       {children}
     </p>
   )
@@ -314,39 +342,39 @@ function Listing<T extends { name: string; status: string }>({ feed, statuses, e
 
   return (
     <>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-1.5">
           {['all', ...statuses].map((value) => (
             <button
               key={value}
               type="button"
               aria-pressed={status === value}
               onClick={() => setStatusFilter(value)}
-              className={`rounded-full px-4 py-2 text-sm font-semibold capitalize transition-colors duration-300 ${
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold capitalize transition-colors ${
                 status === value ? 'bg-burgundy text-blush' : 'bg-white/80 text-burgundy ring-1 ring-burgundy/15 hover:bg-burgundy/10'
               }`}
             >
               {value}
-              <span className="ml-2 opacity-70">{value === 'all' ? feed.rows?.length : count(value)}</span>
+              <span className="ml-1.5 opacity-70">{value === 'all' ? feed.rows?.length : count(value)}</span>
             </button>
           ))}
         </div>
-        <label className="relative w-full sm:w-72">
+        <label className="relative w-full sm:w-64">
           <span className="sr-only">Search</span>
-          <Search aria-hidden className="pointer-events-none absolute left-5 top-1/2 size-5 -translate-y-1/2 text-ink-muted" />
+          <Search aria-hidden className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
           <input
             value={term}
             onChange={(event) => setTerm(event.target.value)}
             type="search"
-            placeholder="Search name, phone, area…"
-            className="field-light min-h-12! py-2.5! pl-13!"
+            placeholder="Search…"
+            className="h-10 w-full rounded-full border border-burgundy/15 bg-white/90 pl-10 pr-4 text-sm focus-visible:border-burgundy focus-visible:outline-none"
           />
         </label>
       </div>
       {visible.length === 0 ? (
         <Notice>Nothing matches that filter.</Notice>
       ) : (
-        <ul className="grid gap-6">{visible.map(render)}</ul>
+        <ul className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 xl:grid-cols-3">{visible.map(render)}</ul>
       )}
     </>
   )
@@ -370,20 +398,20 @@ function Dashboard() {
     feed.rows ? feed.rows.filter((row) => !status || row.status === status).length : null
 
   const tabs: { id: Tab; label: string; total: number | null }[] = [
-    { id: 'bookings', label: 'Customer requests', total: count(bookings) },
-    { id: 'applications', label: 'Saathi applications', total: count(applications) },
+    { id: 'bookings', label: 'Bookings', total: count(bookings) },
+    { id: 'applications', label: 'Applications', total: count(applications) },
   ]
 
   return (
     <>
-      <div className="mb-12 grid gap-5 sm:grid-cols-2 nav:grid-cols-4">
-        <Stat icon={ClipboardList} label="New requests" value={count(bookings, 'new')} highlight />
-        <Stat icon={CalendarClock} label="Visits to run" value={count(bookings, 'assigned')} />
-        <Stat icon={UserRoundPlus} label="Awaiting verification" value={count(applications, 'pending')} />
-        <Stat icon={ShieldCheck} label="Verified Saathis" value={count(applications, 'verified')} />
+      <div className="mb-6 grid grid-cols-2 gap-3 nav:grid-cols-4">
+        <Stat icon={ClipboardList} label="new" value={count(bookings, 'new')} highlight />
+        <Stat icon={CalendarClock} label="to run" value={count(bookings, 'assigned')} />
+        <Stat icon={UserRoundPlus} label="to verify" value={count(applications, 'pending')} />
+        <Stat icon={ShieldCheck} label="Saathis" value={count(applications, 'verified')} />
       </div>
 
-      <div role="tablist" aria-label="Admin sections" className="mb-8 inline-flex flex-wrap gap-1 rounded-full bg-burgundy/10 p-1.5">
+      <div role="tablist" aria-label="Admin sections" className="mb-4 inline-flex flex-wrap gap-1 rounded-full bg-burgundy/10 p-1">
         {tabs.map(({ id, label, total }) => (
           <button
             key={id}
@@ -391,8 +419,8 @@ function Dashboard() {
             role="tab"
             aria-selected={tab === id}
             onClick={() => setTab(id)}
-            className={`rounded-full px-6 py-3 font-semibold transition-colors duration-300 ${
-              tab === id ? 'bg-burgundy text-blush shadow-[0_10px_24px_-12px_rgb(107_30_46/0.9)]' : 'text-burgundy'
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors duration-300 ${
+              tab === id ? 'bg-burgundy text-blush' : 'text-burgundy'
             }`}
           >
             {label}
@@ -584,7 +612,7 @@ export default function Admin() {
       <div aria-hidden className="page-wash fixed inset-0 -z-10" />
       <AdminBar />
       <main className="page-padding">
-        <div className="container-large py-10 nav:py-14">
+        <div className="container-large py-6 nav:py-8">
           <AuthGate action="open the admin page">
             <AdminOnly />
           </AuthGate>

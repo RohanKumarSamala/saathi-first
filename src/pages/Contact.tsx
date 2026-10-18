@@ -1,180 +1,92 @@
-import { ArrowLeft, CircleCheck, Languages, MapPin, ShieldCheck, Shuffle } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import {
+  Ambulance,
+  ArrowLeft,
+  Baby,
+  Car,
+  ChevronRight,
+  HeartHandshake,
+  Hospital,
+  House,
+  Landmark,
+  Mail,
+  Phone,
+  type LucideIcon,
+} from 'lucide-react'
 import { Link, useLocation, useParams } from 'react-router-dom'
-import { AuthGate } from '../auth/AuthGate'
-import { Img } from '../components/Img'
-import { ServiceCards } from '../components/ServiceCards'
 import { services, site, type Service } from '../content/site'
 import { useSaathis } from '../hooks/useSaathis'
-import { type Saathi, type Stored } from '../lib/db'
-import { BookingForm } from './booking/BookingForm'
+import { companionPlans, isPerVisitService, priceLabel, propertyPlan } from '../lib/pricing'
+import { BookingWizard } from './booking/BookingWizard'
 import NotFound from './NotFound'
 
-/** Burgundy photo panel shared by the contact landing and the booking page. */
-function DarkPanel({ children }: { children: ReactNode }) {
+const serviceIcons: Record<string, LucideIcon> = {
+  'hospital-assistance': Hospital,
+  'elder-companionship': HeartHandshake,
+  'banking-assistance': Landmark,
+  'transportation-assistance': Car,
+  'creche-services': Baby,
+  'emergency-support': Ambulance,
+  'property-monitoring': House,
+}
+
+const fromPrice = (service: Service) =>
+  isPerVisitService(service.id) ? priceLabel(propertyPlan) : `from ${companionPlans[0]?.price ?? ''}`
+
+function ServiceIcon({ service, large = false }: { service: Service; large?: boolean }) {
+  const Icon = serviceIcons[service.id] ?? HeartHandshake
   return (
-    <section data-nav-hero className="page-padding relative isolate overflow-hidden bg-burgundy text-blush">
-      <Img
-        name="companionship"
-        alt=""
-        sizes="100vw"
-        eager
-        position="30% 40%"
-        className="absolute inset-0 -z-20 size-full"
-      />
-      <div
-        aria-hidden
-        className="absolute inset-0 -z-10 bg-[linear-gradient(180deg,rgb(58_17_25/0.82),rgb(107_30_46/0.9))] nav:bg-[linear-gradient(90deg,rgb(107_30_46/0.55)_0%,rgb(107_30_46/0.9)_48%,rgb(58_17_25/0.96)_100%)]"
-      />
-      {children}
-    </section>
+    <span className={`grid shrink-0 place-items-center rounded-2xl bg-burgundy/10 text-burgundy ${large ? 'size-14' : 'size-12'}`}>
+      <Icon aria-hidden className={large ? 'size-7' : 'size-6'} strokeWidth={1.7} />
+    </span>
   )
 }
 
-const optionClass =
-  'flex cursor-pointer items-center gap-4 rounded-3xl border border-blush/20 bg-wine/40 p-4 backdrop-blur-sm transition-colors duration-300 hover:border-gold/60 has-checked:border-gold has-checked:bg-blush/15 has-focus-visible:outline-2 has-focus-visible:outline-gold'
-
-function SaathiOption({ value, checked, onChange, badge, title, children }: {
-  value: string
-  checked: boolean
-  onChange: (value: string) => void
-  badge: ReactNode
-  title: ReactNode
-  children: ReactNode
-}) {
+/** Quiet strip for visitors who would rather phone or email than book online. */
+function TalkToUs() {
+  const link =
+    'inline-flex min-h-12 items-center gap-2 rounded-full bg-white/80 px-4 font-semibold text-burgundy ring-1 ring-burgundy/15 transition-colors hover:bg-burgundy hover:text-blush'
   return (
-    <label className={optionClass}>
-      <input
-        type="radio"
-        name="saathi"
-        value={value}
-        checked={checked}
-        onChange={() => onChange(value)}
-        className="sr-only"
-      />
-      <span
-        aria-hidden
-        className="grid size-12 shrink-0 place-items-center rounded-2xl bg-blush/15 text-lg font-semibold text-gold"
-      >
-        {badge}
-      </span>
-      <span className="min-w-0 grow">
-        <span className="block text-lg font-semibold leading-snug">{title}</span>
-        <span className="mt-1 block text-sm text-blush/80">{children}</span>
-      </span>
-      <CircleCheck
-        aria-hidden
-        className={`size-6 shrink-0 text-gold transition-opacity ${checked ? 'opacity-100' : 'opacity-0'}`}
-      />
-    </label>
-  )
-}
-
-function SaathiPicker({ service, matching, choice, onChoose }: {
-  service: Service
-  /** Null while the list is loading. */
-  matching: Stored<Saathi>[] | null
-  choice: string
-  onChoose: (id: string) => void
-}) {
-  return (
-    <fieldset className="mt-10">
-      <legend className="text-eyebrow mb-4 font-semibold text-gold">Choose your Saathi</legend>
-      <div className="grid gap-3">
-        <SaathiOption
-          value=""
-          checked={choice === ''}
-          onChange={onChoose}
-          badge={<Shuffle className="size-5" />}
-          title="Choose for me"
-        >
-          {matching?.length
-            ? 'We’ll pick one of these Saathis at random.'
-            : 'Our team will assign a trained, verified Saathi.'}
-        </SaathiOption>
-        {matching?.map((saathi) => (
-          <SaathiOption
-            key={saathi.id}
-            value={saathi.id}
-            checked={choice === saathi.id}
-            onChange={onChoose}
-            badge={saathi.name[0]?.toUpperCase()}
-            title={
-              <span className="flex flex-wrap items-center gap-x-3">
-                {saathi.name}
-                <span className="inline-flex items-center gap-1 text-xs font-semibold text-gold">
-                  <ShieldCheck aria-hidden className="size-4" />
-                  Verified
-                </span>
-              </span>
-            }
-          >
-            <span className="flex flex-wrap gap-x-4 gap-y-1">
-              {saathi.area && (
-                <span className="inline-flex items-center gap-1.5">
-                  <MapPin aria-hidden className="size-4" />
-                  {saathi.area}
-                </span>
-              )}
-              {saathi.languages && (
-                <span className="inline-flex items-center gap-1.5">
-                  <Languages aria-hidden className="size-4" />
-                  {saathi.languages}
-                </span>
-              )}
-            </span>
-          </SaathiOption>
-        ))}
-      </div>
-      <p role="status" className="mt-4 text-sm text-blush/75">
-        {!matching
-          ? 'Loading Saathis…'
-          : matching.length === 0
-            ? `No Saathis are listed for ${service.name} yet, so our team will assign one for you.`
-            : 'Your choice is a preference. We confirm your Saathi’s availability when we call you.'}
-      </p>
-    </fieldset>
+    <div className="mt-10 flex flex-wrap items-center justify-center gap-3 text-ink-muted">
+      <span>Prefer to talk?</span>
+      <a href={site.phoneHref} className={link}>
+        <Phone aria-hidden className="size-4" />
+        {site.phoneDisplay}
+      </a>
+      <a href={site.emailHref} className={link}>
+        <Mail aria-hidden className="size-4" />
+        Email us
+      </a>
+    </div>
   )
 }
 
 function Booking({ service }: { service: Service }) {
   const { search } = useLocation()
   const saathis = useSaathis()
-  const [choice, setChoice] = useState('')
-  const matching = saathis?.filter((saathi) => saathi.services.includes(service.id)) ?? null
 
   return (
-    <DarkPanel>
-      <div className="container-large grid gap-x-12 gap-y-12 pb-20 pt-32 nav:min-h-screen nav:grid-cols-2 nav:pb-28 nav:pt-44">
-        <div className="animate-rise">
+    <div className="page-padding">
+      <div className="container-large pb-20 pt-28 nav:pt-36">
+        <div className="mx-auto max-w-2xl">
           <Link
             to={`/contact${search}`}
-            className="mb-6 inline-flex items-center gap-2 font-semibold text-gold hover:text-blush"
+            className="-ml-3 mb-4 inline-flex min-h-12 items-center gap-2 rounded-full px-3 font-semibold text-burgundy hover:bg-burgundy/10"
           >
             <ArrowLeft aria-hidden className="size-5" />
             All services
           </Link>
-          <p className="text-eyebrow mb-3 font-semibold text-gold">Book a Saathi</p>
-          <h1 className="text-heading">{service.name}</h1>
-          <p className="text-large mt-4 max-w-md font-medium">{service.summary}</p>
-          <SaathiPicker service={service} matching={matching} choice={choice} onChoose={setChoice} />
-        </div>
-
-        <div className="animate-rise" style={{ animationDelay: '150ms' }}>
-          <p className="text-eyebrow mb-4 font-semibold text-gold">Book your visit</p>
-          <AuthGate action="book a Saathi" tone="dark">
-            <BookingForm service={service} matching={matching ?? []} choice={choice} />
-          </AuthGate>
-          <p className="mt-8 text-sm text-blush/75">
-            Prefer to talk? Call{' '}
-            <a href={site.phoneHref} className="font-semibold text-gold">
-              {site.phoneDisplay}
-            </a>
-            .
-          </p>
+          <div className="mb-8 flex items-center gap-4">
+            <ServiceIcon service={service} large />
+            <div>
+              <h1 className="text-3xl font-light tracking-tight nav:text-4xl">{service.name}</h1>
+              <p className="text-ink-muted">{fromPrice(service)}</p>
+            </div>
+          </div>
+          <BookingWizard service={service} saathis={saathis} />
+          <TalkToUs />
         </div>
       </div>
-    </DarkPanel>
+    </div>
   )
 }
 
@@ -187,52 +99,37 @@ export default function Contact() {
   if (service) return <Booking key={service.id} service={service} />
 
   return (
-    <>
-      <DarkPanel>
-        <div className="container-large grid gap-x-8 gap-y-12 pb-16 pt-32 nav:grid-cols-2 nav:pb-24 nav:pt-44">
-          <div>
-            <h1 className="text-display animate-rise">Contact Us</h1>
-            <p className="text-large mt-5 max-w-md animate-rise font-medium" style={{ animationDelay: '100ms' }}>
-              We’re here to help and hear from you. Have questions or need assistance? Contact Saathi
-              First for trusted elder-care and personal support services in Hyderabad.
-            </p>
-          </div>
-
-          <div className="animate-rise" style={{ animationDelay: '200ms' }}>
-            <p className="text-eyebrow mb-4 font-semibold text-gold">Talk to us</p>
-            <address className="text-subheading font-light not-italic nav:text-[2rem]">
-              <a href={site.phoneHref} className="block transition-colors hover:text-gold">
-                {site.phoneDisplay}
-              </a>
-              <a href={site.emailHref} className="block break-words transition-colors hover:text-gold">
-                {site.email}
-              </a>
-              <span className="block">{site.city}</span>
-            </address>
-          </div>
-        </div>
-      </DarkPanel>
-
-      <section aria-labelledby="book-heading" className="page-padding">
-        <div className="container-large py-16 nav:py-24">
-          <h2 id="book-heading" className="text-heading">
+    <div className="page-padding">
+      <div className="container-large pb-20 pt-28 nav:pt-36">
+        <div className="mx-auto max-w-4xl">
+          <h1 className="text-4xl font-light tracking-tight nav:text-5xl">
             Book a <span className="accent text-rosewood">Saathi</span>
-          </h2>
-          <p className="text-large mt-4 max-w-2xl text-ink-muted">
-            Choose the service you need. On the next step you can pick your Saathi or let us choose
-            one for you.
-          </p>
-          <ServiceCards
-            className="mt-12"
-            to={(item) => `/contact/${item.id}${search}`}
-            action={() => (
-              <span className="inline-flex min-h-12 items-center rounded-pill bg-burgundy px-8 font-semibold text-blush shadow-[0_10px_24px_-12px_rgb(107_30_46/0.9)] transition-colors duration-300 group-hover:bg-wine">
-                Book now
-              </span>
-            )}
-          />
+          </h1>
+          <p className="mt-3 text-lg text-ink-muted">Choose what you need help with. It takes about a minute.</p>
+
+          <ul className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {services.map((item) => (
+              <li key={item.id}>
+                <Link
+                  to={`/contact/${item.id}${search}`}
+                  className="group flex h-full items-center gap-4 rounded-2xl bg-white/90 p-4 ring-1 ring-gold/25 transition-[box-shadow,transform] duration-300 ease-out-soft hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-24px_rgb(58_17_25/0.55)] hover:ring-burgundy/30"
+                >
+                  <ServiceIcon service={item} />
+                  <span className="min-w-0 grow">
+                    <span className="block text-lg font-semibold leading-snug">{item.name}</span>
+                    <span className="line-clamp-2 text-sm text-ink-muted">{item.summary}</span>
+                  </span>
+                  <span className="hidden shrink-0 text-sm font-semibold text-burgundy sm:block">{fromPrice(item)}</span>
+                  <ChevronRight aria-hidden className="size-5 shrink-0 text-burgundy/50 transition-transform group-hover:translate-x-0.5" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+
+          <TalkToUs />
+          <p className="mt-4 text-center text-sm text-ink-muted">{site.city}</p>
         </div>
-      </section>
-    </>
+      </div>
+    </div>
   )
 }

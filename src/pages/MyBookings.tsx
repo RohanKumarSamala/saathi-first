@@ -1,94 +1,68 @@
 import {
   CalendarClock,
   Check,
-  ClipboardCheck,
-  Home,
+  Clock,
+  MapPin,
   MessageCircle,
   Phone,
-  PlayCircle,
+  Plus,
   RotateCcw,
-  UserRoundCheck,
   XCircle,
   type LucideIcon,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { AuthGate } from '../auth/AuthGate'
 import { useAuth } from '../auth/context'
-import { PageHero } from '../components/PageHero'
 import { site } from '../content/site'
 import { callLink, friendlyWhen, whatsappLink } from '../lib/contact'
 import { cancelBooking, watchMyBookings, type Booking, type Stored } from '../lib/db'
 import { hoursLabel } from '../lib/pricing'
 import { MoreTime } from './booking/MoreTime'
 
-const bigButton =
-  'inline-flex min-h-16 items-center justify-center gap-3 rounded-2xl px-7 text-lg font-semibold transition-[transform,background-color] duration-300 ease-out-soft hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-60'
-
 const when = (stamp?: { toDate: () => Date } | null) => (stamp ? friendlyWhen(stamp.toDate()) : '')
 
-/** Plain-words headline for each stage, written for someone reading at a glance. */
-const headline: Record<string, { title: string; body: string }> = {
-  new: {
-    title: 'We have your request',
-    body: 'Our team is choosing a Saathi for you and will call to confirm. You will see their name here.',
-  },
-  assigned: {
-    title: 'Your Saathi is confirmed',
-    body: 'They will come at the time below. You can message or call them directly.',
-  },
-  started: {
-    title: 'Your Saathi is with you now',
-    body: 'The visit has started. We will mark it complete when it ends.',
-  },
+/** Plain words for each stage, short enough to read at a glance. */
+const stage: Record<string, { label: string; tone: string }> = {
+  new: { label: 'Finding your Saathi', tone: 'bg-gold/30 text-wine' },
+  assigned: { label: 'Confirmed', tone: 'bg-rosewood/15 text-burgundy' },
+  started: { label: 'With you now', tone: 'bg-burgundy text-blush' },
+  completed: { label: 'Completed', tone: 'bg-emerald-100 text-emerald-800' },
+  cancelled: { label: 'Cancelled', tone: 'bg-wine/10 text-ink-muted' },
 }
 
-type Step = { key: string; label: string; icon: LucideIcon; time?: string }
+const steps = ['Requested', 'Saathi assigned', 'Visit started', 'Completed']
+const order = ['new', 'assigned', 'started', 'completed']
 
-/** Requested -> Saathi assigned -> Visit started -> Completed, like a ride tracker. */
-function Tracker({ row }: { row: Stored<Booking> }) {
-  const order = ['new', 'assigned', 'started', 'completed']
-  const reached = order.indexOf(row.status)
-  const steps: Step[] = [
-    { key: 'new', label: 'Requested', icon: ClipboardCheck, time: when(row.createdAt) },
-    { key: 'assigned', label: 'Saathi assigned', icon: UserRoundCheck, time: when(row.assignedAt) },
-    { key: 'started', label: 'Visit started', icon: PlayCircle, time: when(row.startedAt) },
-    { key: 'completed', label: 'Completed', icon: Home, time: when(row.completedAt) },
-  ]
+const action =
+  'inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 font-semibold transition-colors disabled:pointer-events-none disabled:opacity-60'
+
+/** One detail on one line behind an icon; the label is read to screen readers only. */
+function Line({ icon: Icon, label, children }: { icon: LucideIcon; label: string; children: ReactNode }) {
+  if (!children) return null
   return (
-    <ol aria-label="Booking progress" className="grid gap-0 sm:grid-cols-4">
-      {steps.map((step, index) => {
-        const done = index <= reached
-        const current = index === reached
-        const Icon = step.icon
-        return (
-          <li key={step.key} className="relative flex gap-4 pb-6 sm:flex-col sm:items-center sm:pb-0 sm:text-center">
-            {index < steps.length - 1 && (
-              <span
-                aria-hidden
-                className={`absolute left-7 top-14 h-[calc(100%-3.5rem)] w-1 rounded-full sm:left-[calc(50%+1.75rem)] sm:top-7 sm:h-1 sm:w-[calc(100%-3.5rem)] ${
-                  index < reached ? 'bg-rosewood' : 'bg-burgundy/15'
-                }`}
-              />
-            )}
-            <span
-              className={`relative grid size-14 shrink-0 place-items-center rounded-full ${
-                done ? 'bg-burgundy text-blush' : 'bg-white text-burgundy/40 ring-2 ring-burgundy/15'
-              } ${current ? 'ring-4 ring-gold/60' : ''}`}
-            >
-              {done && !current ? <Check aria-hidden className="size-7" strokeWidth={2.5} /> : <Icon aria-hidden className="size-7" />}
-            </span>
-            <span className="pt-2 sm:pt-3">
-              <span className={`block text-lg font-semibold ${done ? 'text-ink' : 'text-ink-muted'}`}>
-                {step.label}
-                {current && <span className="sr-only"> (current step)</span>}
-              </span>
-              {done && step.time && <span className="block text-sm text-ink-muted">{step.time}</span>}
-            </span>
-          </li>
-        )
-      })}
-    </ol>
+    <p className="flex items-start gap-2.5">
+      <Icon aria-hidden className="mt-0.5 size-5 shrink-0 text-rosewood" />
+      <span className="sr-only">{label}: </span>
+      <span className="min-w-0 [overflow-wrap:anywhere]">{children}</span>
+    </p>
+  )
+}
+
+/** Four short segments, filled up to the current stage, with the stage named underneath. */
+function Progress({ status }: { status: string }) {
+  const reached = order.indexOf(status)
+  return (
+    <div>
+      <div className="flex gap-1.5" aria-hidden>
+        {steps.map((step, index) => (
+          <span key={step} className={`h-1.5 grow rounded-full ${index <= reached ? 'bg-burgundy' : 'bg-burgundy/15'}`} />
+        ))}
+      </div>
+      <p className="mt-1.5 text-sm text-ink-muted">
+        Step {reached + 1} of {steps.length} · {steps[reached]}
+      </p>
+    </div>
   )
 }
 
@@ -96,13 +70,12 @@ function CurrentBooking({ row }: { row: Stored<Booking> }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const copy = headline[row.status]
   const service = row.serviceName ?? 'Saathi visit'
-  const visit = when(row.scheduledAt)
-  const requestedFor = when(row.preferredStart)
-  const message = `Hello ${row.assignedSaathiName ?? ''}, this is ${row.name} from Saathi First. I am writing about my ${service}${
-    visit ? ` on ${visit}` : ''
-  }.`
+  const visit = when(row.scheduledAt) || when(row.preferredStart)
+  const saathi = row.assignedSaathiName
+  const firstName = saathi?.split(' ')[0] ?? ''
+  const message = `Hello ${saathi ?? ''}, this is ${row.name} from Saathi First about my ${service}${visit ? ` on ${visit}` : ''}.`
+  const { label, tone } = stage[row.status]
 
   const cancel = async () => {
     setBusy(true)
@@ -110,130 +83,94 @@ function CurrentBooking({ row }: { row: Stored<Booking> }) {
     try {
       await cancelBooking(row.id, 'customer')
     } catch {
-      setError(`We could not cancel it. Please call us on ${site.phoneDisplay}.`)
+      setError(`Could not cancel. Please call ${site.phoneDisplay}.`)
       setBusy(false)
     }
   }
 
   return (
-    <article className="overflow-hidden rounded-card bg-white shadow-card ring-1 ring-gold/30">
-      <header className="bg-[linear-gradient(135deg,#6b1e2e,#8f2f42_60%,#b9545c)] p-7 text-blush nav:p-10">
-        <p className="text-eyebrow font-semibold text-gold">{service}</p>
-        <h2 className="mt-2 text-3xl font-normal leading-tight nav:text-4xl">{copy.title}</h2>
-        <p className="mt-3 max-w-2xl text-lg text-blush/90 nav:text-xl">{copy.body}</p>
-      </header>
-
-      <div className="grid gap-8 p-7 nav:p-10">
-        <Tracker row={row} />
-
-        {row.assignedSaathiName ? (
-          <section aria-label="Your Saathi" className="rounded-3xl bg-blush/70 p-6 ring-1 ring-gold/30 nav:p-8">
-            <div className="flex flex-wrap items-center gap-5">
-              <span className="grid size-20 shrink-0 place-items-center rounded-full bg-burgundy text-2xl font-semibold text-blush">
-                {row.assignedSaathiName.slice(0, 1).toUpperCase()}
-              </span>
-              <div>
-                <p className="text-eyebrow font-semibold text-rosewood">Your Saathi</p>
-                <p className="text-3xl font-semibold tracking-tight">{row.assignedSaathiName}</p>
-                {visit && (
-                  <p className="mt-1 flex items-center gap-2 text-lg text-ink-muted">
-                    <CalendarClock aria-hidden className="size-5 shrink-0" />
-                    {row.status === 'started' ? `Started ${when(row.startedAt)}` : visit}
-                  </p>
-                )}
-              </div>
-            </div>
-            {row.assignedSaathiPhone && (
-              <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                <a
-                  href={whatsappLink(row.assignedSaathiPhone, message)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={`${bigButton} bg-[#1f7a46] text-white hover:bg-[#17653a]`}
-                >
-                  <MessageCircle aria-hidden className="size-6" />
-                  WhatsApp {row.assignedSaathiName.split(' ')[0]}
-                </a>
-                <a href={callLink(row.assignedSaathiPhone)} className={`${bigButton} bg-burgundy text-blush hover:bg-wine`}>
-                  <Phone aria-hidden className="size-6" />
-                  Call {row.assignedSaathiName.split(' ')[0]}
-                </a>
-              </div>
-            )}
-          </section>
-        ) : (
-          <section aria-label="Contact us" className="rounded-3xl bg-blush/70 p-6 ring-1 ring-gold/30 nav:p-8">
-            <p className="text-lg">Questions while you wait? We are happy to help.</p>
-            <a href={site.phoneHref} className={`${bigButton} mt-4 bg-burgundy text-blush hover:bg-wine`}>
-              <Phone aria-hidden className="size-6" />
-              Call Saathi First
-            </a>
-          </section>
-        )}
-
-        {(row.status === 'assigned' || row.status === 'started') && row.hours ? <MoreTime row={row} /> : null}
-
-        <dl className="grid gap-x-8 gap-y-4 text-lg sm:grid-cols-2">
-          {!row.assignedSaathiName && requestedFor && (
-            <div>
-              <dt className="text-sm font-semibold text-ink-muted">You asked for</dt>
-              <dd className="font-medium">{requestedFor}</dd>
-            </div>
-          )}
-          {row.hours ? (
-            <div>
-              <dt className="text-sm font-semibold text-ink-muted">How long</dt>
-              <dd className="font-medium">{hoursLabel(row.hours)}</dd>
-            </div>
-          ) : null}
-          {row.planName && (
-            <div>
-              <dt className="text-sm font-semibold text-ink-muted">Plan</dt>
-              <dd className="font-medium">{row.planName} · {row.planPrice}</dd>
-            </div>
-          )}
-          {(row.address || row.location) && (
-            <div>
-              <dt className="text-sm font-semibold text-ink-muted">Where</dt>
-              <dd className="font-medium">{row.address || 'Your shared location'}</dd>
-            </div>
-          )}
-        </dl>
-
-        {row.status === 'new' && (
-          <div className="border-t border-burgundy/10 pt-6">
-            {confirming ? (
-              <div role="alertdialog" aria-label="Cancel this request?" className="rounded-3xl bg-wine/[0.06] p-6">
-                <p className="text-xl font-semibold">Cancel this request?</p>
-                <p className="mt-1 text-lg text-ink-muted">You can always book again later.</p>
-                <div className="mt-5 flex flex-wrap gap-3">
-                  <button type="button" disabled={busy} onClick={cancel} className={`${bigButton} bg-wine text-blush hover:bg-burgundy`}>
-                    {busy ? 'Cancelling…' : 'Yes, cancel it'}
-                  </button>
-                  <button type="button" disabled={busy} onClick={() => setConfirming(false)} className={`${bigButton} bg-white text-burgundy ring-2 ring-burgundy/20`}>
-                    No, keep it
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button type="button" onClick={() => setConfirming(true)} className="inline-flex min-h-12 items-center gap-2 text-lg font-semibold text-ink-muted underline underline-offset-4 hover:text-wine">
-                <XCircle aria-hidden className="size-5" />
-                Cancel this request
-              </button>
-            )}
-            <p role="status" className="mt-3 text-lg text-[#b3261e]">{error}</p>
-          </div>
-        )}
-        {row.status !== 'new' && (
-          <p className="border-t border-burgundy/10 pt-6 text-lg text-ink-muted">
-            Need to change or cancel? Call us on{' '}
-            <a href={site.phoneHref} className="font-semibold text-burgundy underline underline-offset-4">
-              {site.phoneDisplay}
-            </a>
-            .
-          </p>
-        )}
+    <article className="flex min-w-0 flex-col gap-4 rounded-2xl bg-white/90 p-5 shadow-[0_10px_30px_-20px_rgb(58_17_25/0.45)] ring-1 ring-gold/25">
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="text-lg font-semibold leading-snug">{service}</h3>
+        <span className={`shrink-0 rounded-full px-3 py-1 text-sm font-semibold ${tone}`}>{label}</span>
       </div>
+
+      <Progress status={row.status} />
+
+      <div className="grid gap-2">
+        <Line icon={CalendarClock} label={row.scheduledAt ? 'Visit time' : 'You asked for'}>
+          {row.status === 'started' ? `Started ${when(row.startedAt)}` : visit}
+        </Line>
+        <Line icon={Clock} label="How long and price">
+          {[row.hours ? hoursLabel(row.hours) : '', row.planPrice.split(' / ')[0]].filter(Boolean).join(' · ')}
+        </Line>
+        <Line icon={MapPin} label="Where">
+          {row.address || (row.location ? 'Your shared location' : '')}
+        </Line>
+      </div>
+
+      {saathi ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl bg-blush/70 p-3">
+          <span aria-hidden className="grid size-11 shrink-0 place-items-center rounded-full bg-burgundy text-lg font-semibold text-blush">
+            {saathi.slice(0, 1).toUpperCase()}
+          </span>
+          <p className="grow font-semibold">
+            <span className="sr-only">Your Saathi: </span>
+            {saathi}
+          </p>
+          {row.assignedSaathiPhone && (
+            <span className="flex gap-2">
+              <a
+                href={whatsappLink(row.assignedSaathiPhone, message)}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`WhatsApp ${firstName}`}
+                className={`${action} bg-[#1f7a46] text-white hover:bg-[#17653a]`}
+              >
+                <MessageCircle aria-hidden className="size-5" />
+                WhatsApp
+              </a>
+              <a href={callLink(row.assignedSaathiPhone)} aria-label={`Call ${firstName}`} className={`${action} bg-burgundy text-blush hover:bg-wine`}>
+                <Phone aria-hidden className="size-5" />
+                Call
+              </a>
+            </span>
+          )}
+        </div>
+      ) : null}
+
+      {(row.status === 'assigned' || row.status === 'started') && row.hours ? <MoreTime row={row} /> : null}
+
+      {row.status === 'new' &&
+        (confirming ? (
+          <div role="alertdialog" aria-label="Cancel this request?" className="grid gap-3 rounded-xl bg-wine/[0.06] p-3">
+            <p className="font-semibold">Cancel this request?</p>
+            <div className="flex gap-2">
+              <button type="button" disabled={busy} onClick={cancel} className={`${action} grow bg-wine text-blush hover:bg-burgundy`}>
+                {busy ? 'Cancelling…' : 'Yes, cancel'}
+              </button>
+              <button type="button" disabled={busy} onClick={() => setConfirming(false)} className={`${action} grow bg-white text-burgundy ring-1 ring-burgundy/20`}>
+                Keep it
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-2 border-t border-burgundy/10 pt-3">
+            <a href={site.phoneHref} className={`${action} -ml-2 text-burgundy hover:bg-burgundy/10`}>
+              <Phone aria-hidden className="size-5" />
+              Call us
+            </a>
+            <button type="button" onClick={() => setConfirming(true)} className={`${action} -mr-2 text-ink-muted hover:bg-wine/10 hover:text-wine`}>
+              <XCircle aria-hidden className="size-5" />
+              Cancel
+            </button>
+          </div>
+        ))}
+      {error && (
+        <p role="status" className="text-sm text-[#b3261e]">
+          {error}
+        </p>
+      )}
     </article>
   )
 }
@@ -241,27 +178,25 @@ function CurrentBooking({ row }: { row: Stored<Booking> }) {
 function PastBooking({ row }: { row: Stored<Booking> }) {
   const done = row.status === 'completed'
   return (
-    <li className="flex flex-wrap items-center justify-between gap-4 rounded-3xl bg-white/90 p-6 shadow-card ring-1 ring-gold/25">
-      <div className="flex items-center gap-4">
-        <span className={`grid size-12 shrink-0 place-items-center rounded-full ${done ? 'bg-emerald-100 text-emerald-800' : 'bg-wine/10 text-ink-muted'}`}>
-          {done ? <Check aria-hidden className="size-6" strokeWidth={2.5} /> : <XCircle aria-hidden className="size-6" />}
-        </span>
-        <div>
-          <p className="text-xl font-semibold">{row.serviceName ?? 'Saathi visit'}</p>
-          <p className="text-lg text-ink-muted">
-            {done ? 'Completed' : 'Cancelled'}
-            {' · '}
-            {when(row.completedAt ?? row.cancelledAt ?? row.scheduledAt ?? row.createdAt)}
-            {row.assignedSaathiName && ` · with ${row.assignedSaathiName}`}
-          </p>
-        </div>
+    <li className="flex min-w-0 items-center gap-3 rounded-2xl bg-white/90 p-4 ring-1 ring-gold/25">
+      <span className={`grid size-10 shrink-0 place-items-center rounded-full ${done ? 'bg-emerald-100 text-emerald-800' : 'bg-wine/10 text-ink-muted'}`}>
+        {done ? <Check aria-hidden className="size-5" strokeWidth={2.5} /> : <XCircle aria-hidden className="size-5" />}
+        <span className="sr-only">{done ? 'Completed' : 'Cancelled'}</span>
+      </span>
+      <div className="min-w-0 grow">
+        <p className="truncate font-semibold">{row.serviceName ?? 'Saathi visit'}</p>
+        <p className="truncate text-sm text-ink-muted">
+          {when(row.completedAt ?? row.cancelledAt ?? row.scheduledAt ?? row.createdAt)}
+          {row.assignedSaathiName && ` · ${row.assignedSaathiName}`}
+        </p>
       </div>
       <Link
         to={row.serviceId ? `/contact/${row.serviceId}` : '/contact'}
-        className="inline-flex min-h-12 items-center gap-2 rounded-2xl px-5 text-lg font-semibold text-burgundy ring-2 ring-burgundy/20 transition-colors hover:bg-burgundy hover:text-blush"
+        aria-label={`Book ${row.serviceName ?? 'this'} again`}
+        title="Book again"
+        className="grid size-12 shrink-0 place-items-center rounded-full bg-burgundy/10 text-burgundy transition-colors hover:bg-burgundy hover:text-blush"
       >
         <RotateCcw aria-hidden className="size-5" />
-        Book again
       </Link>
     </li>
   )
@@ -274,52 +209,57 @@ function Bookings() {
 
   useEffect(() => {
     if (!user) return
-    return watchMyBookings(user.uid, setRows, () => setError('We could not load your bookings. Please refresh the page.'))
+    return watchMyBookings(user.uid, setRows, () => setError('Could not load your bookings. Please refresh the page.'))
   }, [user])
 
-  if (error) return <p role="alert" className="rounded-card bg-white/90 p-8 text-xl shadow-card">{error}</p>
-  if (!rows) return <p role="status" className="rounded-card bg-white/90 p-8 text-xl shadow-card">Loading your bookings…</p>
-
-  const current = rows
-    .filter((row) => ['new', 'assigned', 'started'].includes(row.status))
-    .sort((a, b) => (a.scheduledAt?.toMillis() ?? Infinity) - (b.scheduledAt?.toMillis() ?? Infinity))
-  const past = rows.filter((row) => !current.includes(row))
-
+  const box = 'rounded-2xl bg-white/90 p-6 ring-1 ring-gold/25'
+  if (error) return <p role="alert" className={box}>{error}</p>
+  if (!rows) return <p role="status" className={box}>Loading your bookings…</p>
   if (rows.length === 0) {
     return (
-      <div className="rounded-card bg-white/90 p-8 shadow-card ring-1 ring-gold/30 nav:p-12">
-        <p className="text-3xl font-light">You have no bookings yet.</p>
-        <p className="mt-2 text-xl text-ink-muted">When you book a Saathi, you can follow it here.</p>
-        <Link to="/contact" className={`${bigButton} mt-8 bg-burgundy text-blush hover:bg-wine`}>
+      <div className={`${box} flex flex-wrap items-center justify-between gap-4`}>
+        <p className="text-lg">No bookings yet.</p>
+        <Link to="/contact" className={`${action} bg-burgundy text-blush hover:bg-wine`}>
           Book a Saathi
         </Link>
       </div>
     )
   }
 
+  const current = rows
+    .filter((row) => ['new', 'assigned', 'started'].includes(row.status))
+    .sort(
+      (a, b) =>
+        ((a.scheduledAt ?? a.preferredStart)?.toMillis() ?? Infinity) - ((b.scheduledAt ?? b.preferredStart)?.toMillis() ?? Infinity),
+    )
+  const past = rows.filter((row) => !current.includes(row))
+
   return (
-    <div className="grid gap-14">
-      <section aria-labelledby="current-heading" className="grid gap-6">
-        <h2 id="current-heading" className="text-3xl font-light nav:text-4xl">
-          {current.length > 1 ? 'Current bookings' : 'Current booking'}
+    <div className="grid gap-8">
+      <section aria-labelledby="current-heading" className="grid gap-3">
+        <h2 id="current-heading" className="text-lg font-semibold">
+          Upcoming
         </h2>
         {current.length > 0 ? (
-          current.map((row) => <CurrentBooking key={row.id} row={row} />)
-        ) : (
-          <div className="flex flex-wrap items-center justify-between gap-5 rounded-card bg-white/90 p-8 shadow-card ring-1 ring-gold/25">
-            <p className="text-xl">Nothing booked right now.</p>
-            <Link to="/contact" className={`${bigButton} bg-burgundy text-blush hover:bg-wine`}>
-              Book a Saathi
-            </Link>
+          <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
+            {current.map((row) => (
+              <CurrentBooking key={row.id} row={row} />
+            ))}
           </div>
+        ) : (
+          <p className={box}>Nothing booked right now.</p>
         )}
       </section>
 
       {past.length > 0 && (
-        <section aria-labelledby="past-heading" className="grid gap-5">
-          <h2 id="past-heading" className="text-3xl font-light nav:text-4xl">Past bookings</h2>
-          <ul className="grid gap-4">
-            {past.map((row) => <PastBooking key={row.id} row={row} />)}
+        <section aria-labelledby="past-heading" className="grid gap-3">
+          <h2 id="past-heading" className="text-lg font-semibold">
+            Past
+          </h2>
+          <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {past.map((row) => (
+              <PastBooking key={row.id} row={row} />
+            ))}
           </ul>
         </section>
       )}
@@ -329,25 +269,23 @@ function Bookings() {
 
 export default function MyBookings() {
   return (
-    <>
-      <PageHero
-        title="My bookings"
-        intro="See who is coming and when, message your Saathi, and look back at past visits."
-        tagline={
-          <>
-            Always know <span className="accent text-rosewood">who is coming.</span>
-          </>
-        }
-      />
-      <div className="page-padding">
-        <div className="container-large py-12 nav:py-20">
-          <div className="mx-auto max-w-5xl">
-            <AuthGate action="see your bookings">
-              <Bookings />
-            </AuthGate>
+    <div className="page-padding">
+      <div className="container-large pb-16 pt-28 nav:pb-24 nav:pt-36">
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+            <h1 className="text-3xl font-light tracking-tight nav:text-4xl">
+              My <span className="accent text-rosewood">bookings</span>
+            </h1>
+            <Link to="/contact" className={`${action} bg-burgundy text-blush hover:bg-wine`}>
+              <Plus aria-hidden className="size-5" />
+              Book a Saathi
+            </Link>
           </div>
+          <AuthGate action="see your bookings">
+            <Bookings />
+          </AuthGate>
         </div>
       </div>
-    </>
+    </div>
   )
 }
