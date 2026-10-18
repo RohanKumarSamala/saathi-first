@@ -24,6 +24,7 @@ export function ServiceCards({ to, action, className = '' }: Props) {
             <Img
               name={service.image as ImageName}
               alt=""
+              position={service.imagePosition}
               sizes="(min-width: 992px) 405px, (min-width: 640px) 45vw, 90vw"
               eager={index < 3}
               className="aspect-[3/2] w-full"

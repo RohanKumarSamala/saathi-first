@@ -1,11 +1,16 @@
 import { Check } from 'lucide-react'
+import { useState } from 'react'
 import { ButtonLink } from '../components/Button'
 import { Img } from '../components/Img'
 import { PageHero } from '../components/PageHero'
+import { ServicePlansDialog } from '../components/ServicePlansDialog'
 import { services } from '../content/site'
 import type { ImageName } from '../lib/images'
 
 export default function Services() {
+  const [openId, setOpenId] = useState<string | null>(null)
+  const openService = services.find((service) => service.id === openId)
+
   return (
     <>
       <PageHero
@@ -31,6 +36,7 @@ export default function Services() {
               <Img
                 name={service.image as ImageName}
                 alt={service.imageAlt}
+                position={service.imagePosition}
                 sizes="(min-width: 992px) 624px, 45vw"
                 eager={index < 2}
                 className={`aspect-[4/3] w-full nav:aspect-auto nav:h-full nav:min-h-[30rem] nav:rounded-card nav:shadow-card ${
@@ -63,13 +69,13 @@ export default function Services() {
                   </ul>
                 </div>
                 <div className="mt-auto pt-4 nav:mt-0 nav:pt-8">
-                  <ButtonLink
-                    to={`/contact/${service.id}`}
-                    variant="solid"
-                    className="w-full px-0! nav:w-auto nav:px-8!"
+                  <button
+                    type="button"
+                    onClick={() => setOpenId(service.id)}
+                    className="min-h-11 w-full rounded-pill bg-burgundy px-2 text-sm font-semibold text-blush shadow-[0_10px_24px_-12px_rgb(107_30_46/0.9)] transition-colors hover:bg-wine nav:min-h-12 nav:w-auto nav:px-8 nav:text-base"
                   >
-                    Book now
-                  </ButtonLink>
+                    See plans
+                  </button>
                 </div>
               </div>
             </section>
@@ -82,6 +88,7 @@ export default function Services() {
           </div>
         </div>
       </div>
+      {openService && <ServicePlansDialog service={openService} onClose={() => setOpenId(null)} />}
     </>
   )
 }

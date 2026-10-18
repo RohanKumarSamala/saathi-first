@@ -48,7 +48,8 @@ function Layout() {
       </a>
       {/* Fixed page wash: the soft blush glow sits behind every light section. */}
       <div aria-hidden className="page-wash fixed inset-0 -z-10" />
-      <Header />
+      {/* Booking a service (/contact/<service>) is a focused task, so the site menu steps aside. */}
+      {!/^\/contact\/[^/]+/.test(pathname) && <Header />}
       <main id="main" className="[overflow-x:clip]">
         <Outlet />
       </main>

@@ -25,6 +25,8 @@ export type Service = {
   points: string[]
   image: string
   imageAlt: string
+  /** Where the people are in the photo, so tall crops keep their faces in view. */
+  imagePosition?: string
 }
 
 export const services: Service[] = [
@@ -44,8 +46,8 @@ export const services: Service[] = [
       'Accompaniment during consultations.',
     ],
     image: 'svc-hospital',
-    imageAlt:
-      'Two Saathi First companions helping an elderly couple at a hospital outpatient desk',
+    imageAlt: 'A Saathi First companion handing a glass of water to an elderly woman in a hospital bed',
+    imagePosition: '40% 40%',
   },
   {
     id: 'elder-companionship',
@@ -63,7 +65,8 @@ export const services: Service[] = [
       'Assistance with daily activities and personal needs.',
     ],
     image: 'svc-elder',
-    imageAlt: 'A Saathi First companion holding hands with a smiling elderly woman at home',
+    imageAlt: 'A Saathi First companion reading with a smiling elderly woman holding a cup of tea',
+    imagePosition: '45% 40%',
   },
   {
     id: 'banking-assistance',
@@ -80,7 +83,8 @@ export const services: Service[] = [
       'Support pension-related enquiries and documentation.',
     ],
     image: 'svc-banking',
-    imageAlt: 'Saathi First companions assisting an elderly couple at a bank counter',
+    imageAlt: 'A Saathi First companion helping an elderly man fill in a form at a bank',
+    imagePosition: '42% 40%',
   },
   {
     id: 'transportation-assistance',
@@ -98,7 +102,8 @@ export const services: Service[] = [
       'Keep family members updated about pickup, arrival and drop-off.',
     ],
     image: 'svc-travel',
-    imageAlt: 'Saathi First companions travelling with seniors by bus and by car',
+    imageAlt: 'A Saathi First companion helping an elderly woman step out of a car',
+    imagePosition: '45% 40%',
   },
   {
     id: 'creche-services',
@@ -116,7 +121,8 @@ export const services: Service[] = [
       'In-home childcare support at residential locations.',
     ],
     image: 'svc-children',
-    imageAlt: 'A Saathi First companion playing with children at an event creche',
+    imageAlt: 'A Saathi First companion playing with building blocks with children at a creche',
+    imagePosition: '45% 40%',
   },
   {
     id: 'emergency-support',
@@ -134,7 +140,8 @@ export const services: Service[] = [
       'Help arrange transportation to nearby hospitals or medical facilities.',
     ],
     image: 'svc-emergency',
-    imageAlt: 'Saathi First companions supporting seniors arriving at an emergency department',
+    imageAlt: 'A Saathi First companion offering water to an unwell elderly man beside a first-aid kit',
+    imagePosition: '45% 40%',
   },
   {
     id: 'property-monitoring',
@@ -155,6 +162,7 @@ export const services: Service[] = [
     ],
     image: 'svc-property',
     imageAlt: 'A Saathi First team member reviewing a property report with an owner on a laptop',
+    imagePosition: '50% 40%',
   },
 ]
 
@@ -236,6 +244,295 @@ export const plans: Plan[] = [
     includes: companionServices,
   },
 ]
+
+export type Membership = {
+  id: string
+  name: string
+  price: string
+  description: string
+  visits: string
+  hoursEach: string
+  includes: string[]
+  /** One line listing what the plan does not cover. */
+  notIncluded: string
+  image: string
+  imageAlt: string
+  imagePosition: string
+}
+
+/**
+ * Monthly memberships, taken from the plans artwork supplied on 18 Oct 2026.
+ * Booked by WhatsApp for now: firestore.rules only accepts the per-visit plans above.
+ */
+export const memberships: Membership[] = [
+  {
+    id: 'basic-care',
+    name: 'Basic Care',
+    price: '₹1,499',
+    description: 'For occasional companionship and everyday assistance.',
+    visits: '4 visits per month',
+    hoursEach: 'Up to 2 hours each',
+    includes: [
+      'Elder companionship',
+      'Basic errands and shopping',
+      'Appointment reminders',
+      'Family updates after visits',
+    ],
+    notIncluded: 'Hospital accompaniment, bank/government office visits, transport',
+    image: 'companionship',
+    imageAlt: 'A Saathi First companion sharing tea with an elderly woman at home',
+    imagePosition: '62% 40%',
+  },
+  {
+    id: 'silver-care',
+    name: 'Silver Care',
+    price: '₹2,999',
+    description: 'For regular support for elderly loved ones.',
+    visits: '8 visits per month',
+    hoursEach: 'Up to 2 hours each',
+    includes: [
+      'Hospital appointment support',
+      'Bank & government office visits',
+      'Grocery and medicine pickup',
+      'Family updates after every visit',
+    ],
+    notIncluded: 'Medical procedures, long-term nursing, special transport',
+    image: 'banking',
+    imageAlt: 'A Saathi First companion going through papers with an elderly man at a bank desk',
+    imagePosition: '50% 40%',
+  },
+  {
+    id: 'premium-care',
+    name: 'Premium Care',
+    price: '₹5,999',
+    description: 'For families who need more frequent personal assistance.',
+    visits: '16 visits per month',
+    hoursEach: 'Up to 2 hours each',
+    includes: [
+      'Companionship and daily errands',
+      'Transport coordination',
+      'Appointment assistance',
+      'Regular family progress reports',
+    ],
+    notIncluded: 'Personal medical care, nursing, specialist services',
+    image: 'transport',
+    imageAlt: 'A Saathi First companion helping an elderly woman out of a car',
+    imagePosition: '50% 35%',
+  },
+]
+
+export type IndividualService = {
+  id: string
+  name: string
+  description: string
+  points: string[]
+  price: string
+  unit: string
+  /** Project photo; services without a fitting photo show their icon instead. */
+  image?: string
+  imageAlt?: string
+  imagePosition?: string
+}
+
+/**
+ * One-time services for the Individual Plans tab, taken from the artwork supplied on 18 Oct 2026.
+ * Booked by WhatsApp for now: firestore.rules only accepts the per-visit plans above.
+ */
+export const individualServices: IndividualService[] = [
+  {
+    id: 'elder-companion',
+    name: 'Elder Companion',
+    description: 'Friendly companionship for your loved ones, keeping them happy, active and engaged.',
+    points: ['Meaningful conversations', 'Walks and outdoor time', 'Social engagement & activities'],
+    price: '₹199',
+    unit: 'hour',
+    image: 'companionship',
+    imageAlt: 'A Saathi First companion sharing tea with an elderly woman at home',
+    imagePosition: '62% 40%',
+  },
+  {
+    id: 'hospital-appointment',
+    name: 'Hospital Appointment Assistance',
+    description: 'Accompany your loved ones to hospital appointments and help with the process.',
+    points: ['Queue management', 'Doctor consultation support', 'Reports & prescription handling'],
+    price: '₹299',
+    unit: 'visit',
+    image: 'hospital',
+    imageAlt: 'A Saathi First companion sitting with an elderly man at his hospital bedside',
+    imagePosition: '62% 45%',
+  },
+  {
+    id: 'bank-government',
+    name: 'Bank & Government Office Assistance',
+    description: 'Help with banking, bill payments and government office visits.',
+    points: ['Form filling and documentation', 'Token and queue support', 'Safe and reliable assistance'],
+    price: '₹299',
+    unit: 'visit',
+    image: 'banking',
+    imageAlt: 'A Saathi First companion going through papers with an elderly man at a bank desk',
+    imagePosition: '50% 40%',
+  },
+  {
+    id: 'transportation',
+    name: 'Transportation Assistance',
+    description: 'Safe and comfortable travel for your loved ones, within the city.',
+    points: ['Pick-up and drop-off', 'Auto/cab coordination', 'Help with luggage and seating'],
+    price: '₹349',
+    unit: 'trip',
+    image: 'transport',
+    imageAlt: 'A Saathi First companion helping an elderly woman out of a car',
+    imagePosition: '50% 35%',
+  },
+  {
+    id: 'grocery-shopping',
+    name: 'Grocery & Essential Shopping',
+    description: 'Get daily essentials, groceries and household items, without the hassle.',
+    points: ['List-based shopping', 'Bill and purchase updates', 'Safe and timely delivery'],
+    price: '₹299',
+    unit: 'visit',
+  },
+  {
+    id: 'meal-routine',
+    name: 'Meal & Daily Routine Assistance',
+    description: 'Support with meals, hydration and daily routine activities.',
+    points: ['Meal preparation / serving', 'Hydration reminders', 'Light housekeeping support'],
+    price: '₹299',
+    unit: 'visit',
+  },
+  {
+    id: 'digital-assistance',
+    name: 'Digital Assistance for Seniors',
+    description: 'Help your loved ones stay connected and confident with technology.',
+    points: ['Video calls & messaging', 'Online appointments & bill payments', 'Smartphone / app training'],
+    price: '₹199',
+    unit: 'session',
+    image: 'caring-call',
+    imageAlt: 'A Saathi First companion on a phone call beside an elderly woman at home',
+    imagePosition: '58% 40%',
+  },
+  {
+    id: 'event-temple',
+    name: 'Event & Temple Visit Assistance',
+    description: 'Accompany your loved ones to family functions, weddings and temple visits.',
+    points: ['Travel and entry assistance', 'Support with belongings', 'Companionship throughout'],
+    price: '₹499',
+    unit: 'outing',
+    image: 'travel-bus',
+    imageAlt: 'A Saathi First companion travelling beside a smiling elderly woman',
+    imagePosition: '50% 30%',
+  },
+  {
+    id: 'home-maintenance',
+    name: 'Home Maintenance Coordination',
+    description: 'Get trusted help for everyday home maintenance needs.',
+    points: ['Plumber, electrician, cleaning & pest control', 'Timely coordination and follow-up', 'Verified professionals'],
+    price: '₹199',
+    unit: 'coordination fee',
+  },
+]
+
+export type AddOn = { id: string; name: string; description: string; price: string; unit: string }
+
+/** Premium add-ons, supplied on 18 Oct 2026. Booked by WhatsApp, like the memberships. */
+export const premiumAddOns: AddOn[] = [
+  {
+    id: 'extra-hospital-visit',
+    name: 'Extra Hospital Visit',
+    description: 'Additional hospital accompaniment beyond the visits included in a membership.',
+    price: '₹399',
+    unit: 'visit',
+  },
+  {
+    id: 'extended-companionship',
+    name: 'Extended Companionship',
+    description: 'Add extra hours of companionship, conversation, and everyday assistance.',
+    price: '₹199',
+    unit: 'extra hour',
+  },
+  {
+    id: 'special-transportation',
+    name: 'Special Transportation',
+    description: 'Arrange additional trips for medical appointments, shopping, or family functions.',
+    price: '₹349',
+    unit: 'trip',
+  },
+  {
+    id: 'medicine-pickup',
+    name: 'Medicine Pickup',
+    description: 'Collect prescribed medicines and arrange refills with family approval.',
+    price: '₹149',
+    unit: 'pickup',
+  },
+  {
+    id: 'special-event-assistance',
+    name: 'Special Event Assistance',
+    description: 'Additional support for weddings, family celebrations, and religious outings.',
+    price: '₹499',
+    unit: 'outing',
+  },
+  {
+    id: 'priority-booking',
+    name: 'Priority Booking',
+    description: 'Priority scheduling for available appointment slots, subject to staff availability.',
+    price: '₹199',
+    unit: 'booking',
+  },
+]
+
+const allCompanionPlans = ['quick', 'care', 'day', 'extended']
+
+/**
+ * What the Our Services "See plans" pop-up lists for each service, mirroring the Our Plans page:
+ * `perVisit` (Individual Plans tab, booked online), `individual` (one-time services from that tab),
+ * `memberships` (Monthly Memberships tab) and `addOns` (Premium Add-ons tab).
+ */
+export const servicePlans: Record<
+  string,
+  { perVisit: string[]; individual: string[]; memberships: string[]; addOns: string[] }
+> = {
+  'hospital-assistance': {
+    perVisit: allCompanionPlans,
+    individual: [],
+    memberships: ['silver-care', 'premium-care'],
+    addOns: ['extra-hospital-visit', 'medicine-pickup', 'priority-booking'],
+  },
+  'elder-companionship': {
+    perVisit: allCompanionPlans,
+    individual: ['event-temple'],
+    memberships: ['basic-care', 'premium-care'],
+    addOns: ['extended-companionship', 'special-event-assistance'],
+  },
+  'banking-assistance': {
+    perVisit: allCompanionPlans,
+    individual: [],
+    memberships: ['silver-care'],
+    addOns: ['priority-booking'],
+  },
+  'transportation-assistance': {
+    perVisit: allCompanionPlans,
+    individual: ['event-temple'],
+    memberships: ['premium-care'],
+    addOns: ['special-transportation'],
+  },
+  'creche-services': {
+    perVisit: allCompanionPlans,
+    individual: [],
+    memberships: [],
+    addOns: ['special-event-assistance'],
+  },
+  'emergency-support': {
+    perVisit: allCompanionPlans,
+    individual: [],
+    memberships: [],
+    addOns: ['medicine-pickup', 'priority-booking'],
+  },
+  'property-monitoring': {
+    perVisit: ['property'],
+    individual: [],
+    memberships: [],
+    addOns: [],
+  },
+}
 
 export const valueCards = [
   {

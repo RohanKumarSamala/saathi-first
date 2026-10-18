@@ -13,6 +13,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { Link, useLocation, useParams } from 'react-router-dom'
+import logoIcon from '../assets/logo/icon-dark.svg'
 import { services, site, type Service } from '../content/site'
 import { useSaathis } from '../hooks/useSaathis'
 import { companionPlans, isPerVisitService, priceLabel, propertyPlan } from '../lib/pricing'
@@ -66,15 +67,21 @@ function Booking({ service }: { service: Service }) {
 
   return (
     <div className="page-padding">
-      <div className="container-large pb-20 pt-28 nav:pt-36">
+      {/* No site menu here (see App.tsx): the brand mark leads home and the back link to the services. */}
+      <div className="container-large pb-20 pt-6 nav:pt-10">
         <div className="mx-auto max-w-2xl">
-          <Link
-            to={`/contact${search}`}
-            className="-ml-3 mb-4 inline-flex min-h-12 items-center gap-2 rounded-full px-3 font-semibold text-burgundy hover:bg-burgundy/10"
-          >
-            <ArrowLeft aria-hidden className="size-5" />
-            All services
-          </Link>
+          <div className="mb-6 flex items-center justify-between gap-4">
+            <Link
+              to={`/contact${search}`}
+              className="-ml-3 inline-flex min-h-12 items-center gap-2 rounded-full px-3 font-semibold text-burgundy hover:bg-burgundy/10"
+            >
+              <ArrowLeft aria-hidden className="size-5" />
+              All services
+            </Link>
+            <Link to="/" aria-label="Saathi First home" className="rounded-lg">
+              <img src={logoIcon} alt="" width={48} height={48} className="size-11" />
+            </Link>
+          </div>
           <div className="mb-8 flex items-center gap-4">
             <ServiceIcon service={service} large />
             <div>

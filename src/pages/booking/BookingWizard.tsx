@@ -6,11 +6,8 @@ import {
   Clock,
   LocateFixed,
   MapPin,
-  Minus,
   Pencil,
-  Plus,
   Shuffle,
-  Sun,
 } from 'lucide-react'
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -18,6 +15,8 @@ import { AuthGate } from '../../auth/AuthGate'
 import { useAuth } from '../../auth/context'
 import { plans, site, type Service } from '../../content/site'
 import { friendlyWhen } from '../../lib/contact'
+import { dateKey } from '../../lib/dates'
+import { DateCalendar } from './DateCalendar'
 import { createBooking, type Saathi, type SharedLocation, type Stored } from '../../lib/db'
 import { isValidIndianMobile } from '../../lib/enquiry'
 import {
@@ -34,18 +33,19 @@ import {
 
 type StepId = 'time' | 'when' | 'where' | 'confirm'
 type Locating = 'idle' | 'locating' | 'denied' | 'unavailable'
-type Day = 'today' | 'tomorrow' | 'other' | ''
 
-// Visits start between 7 am and 8 pm on the half hour; same-day visits need 90 minutes' notice.
+// Visits start from 7 am on the half hour and must finish by 11 pm, so the latest start
+// depends on the plan's hours (2 hrs → 9 pm, 12 hrs → 11 am). Property visits have no set
+// length and start by 8 pm. Same-day visits need 90 minutes' notice.
 const FIRST_SLOT = 7 * 60
-const LAST_SLOT = 20 * 60
+const LATEST_END = 23 * 60
+const PER_VISIT_LAST_SLOT = 20 * 60
 const NOTICE_MINUTES = 90
 const MAX_DAYS_AHEAD = 90
 
 const pad = (value: number) => String(value).padStart(2, '0')
 const isoDate = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 const addDays = (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days)
-const shortDay = (date: Date) => date.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
 const pickAtRandom = <T,>(list: T[]): T | undefined => list[Math.floor(Math.random() * list.length)]
 const isTooSoon = (date: Date) => date.getTime() < Date.now() + 30 * 60_000
 
@@ -55,14 +55,34 @@ function slotLabel(minutes: number) {
   return `${display}:${pad(minutes % 60)} ${hours >= 12 ? 'pm' : 'am'}`
 }
 
-/** Start times on `date`; today only offers those with enough notice. */
-function slotsFor(date: Date, now: Date) {
+/** Start times on `date` up to `lastStart`; today only offers those with enough notice. */
+function slotsFor(date: Date, now: Date, lastStart: number) {
   const all: number[] = []
-  for (let minutes = FIRST_SLOT; minutes <= LAST_SLOT; minutes += 30) all.push(minutes)
+  for (let minutes = FIRST_SLOT; minutes <= lastStart; minutes += 30) all.push(minutes)
   if (isoDate(date) !== isoDate(now)) return all
   const earliest = now.getHours() * 60 + now.getMinutes() + NOTICE_MINUTES
   return all.filter((minutes) => minutes >= earliest)
 }
+
+type AddressPart = 'flat' | 'building' | 'street' | 'landmark' | 'pin'
+
+// Lengths keep the joined address under the 300 characters firestore.rules allows.
+const addressFields: {
+  id: AddressPart
+  label: string
+  placeholder: string
+  required: boolean
+  maxLength: number
+  autoComplete: string
+  message: string
+  wide?: boolean
+}[] = [
+  { id: 'flat', label: 'Flat / house no.', placeholder: 'e.g. Flat 302', required: true, maxLength: 30, autoComplete: 'address-line1', message: 'Please enter your flat or house number.' },
+  { id: 'building', label: 'Apartment / building name', placeholder: 'e.g. Green Residency', required: false, maxLength: 60, autoComplete: 'address-line2', message: '' },
+  { id: 'street', label: 'Street / lane / area', placeholder: 'e.g. Road No. 12, Banjara Hills', required: true, maxLength: 90, autoComplete: 'address-line3', message: 'Please enter the street, lane or area.', wide: true },
+  { id: 'landmark', label: 'Landmark', placeholder: 'e.g. Near City Centre Mall', required: false, maxLength: 60, autoComplete: 'off', message: '' },
+  { id: 'pin', label: 'PIN code', placeholder: '6 digits, e.g. 500034', required: true, maxLength: 6, autoComplete: 'postal-code', message: 'Please enter a 6-digit PIN code.' },
+]
 
 const periods = [
   { label: 'Morning', from: 0, to: 12 * 60 },
@@ -129,18 +149,43 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
 
   const [now] = useState(() => new Date())
   const today = useMemo(() => addDays(now, 0), [now])
-  const todaySlots = slotsFor(today, now)
-  const [day, setDay] = useState<Day>(todaySlots.length ? '' : 'tomorrow')
-  const [otherDate, setOtherDate] = useState('')
+  // The latest start that still ends the visit by 11 pm.
+  const lastStart = perVisit ? PER_VISIT_LAST_SLOT : LATEST_END - hours * 60
+  const todaySlots = slotsFor(today, now, lastStart)
+  const firstDay = todaySlots.length ? today : addDays(today, 1)
+  const lastDay = addDays(today, MAX_DAYS_AHEAD)
+  const [visitKey, setVisitKey] = useState('')
   const [slot, setSlot] = useState('')
-  const visitDate =
-    day === 'today' ? today : day === 'tomorrow' ? addDays(today, 1) : day === 'other' && otherDate ? new Date(`${otherDate}T00:00`) : null
-  const slots = visitDate ? slotsFor(visitDate, now) : []
+  const visitDate = visitKey ? new Date(`${visitKey}T00:00`) : null
+  // Before a date is picked every time is open; a date (today especially) can close some.
+  const allSlots = slotsFor(addDays(today, 1), now, lastStart)
+  const slots = visitDate ? slotsFor(visitDate, now, lastStart) : allSlots
   const start = visitDate && slot ? new Date(visitDate.getFullYear(), visitDate.getMonth(), visitDate.getDate(), 0, Number(slot)) : null
 
   const [location, setLocation] = useState<SharedLocation | null>(null)
   const [locating, setLocating] = useState<Locating>('idle')
-  const [address, setAddress] = useState('')
+  const [addressParts, setAddressParts] = useState<Record<AddressPart, string>>({
+    flat: '',
+    building: '',
+    street: '',
+    landmark: '',
+    pin: '',
+  })
+  // Stored as one line, e.g. "Flat 302, Green Residency, Road No. 12, Banjara Hills, near City Centre Mall, 500034".
+  const address = [
+    addressParts.flat,
+    addressParts.building,
+    addressParts.street,
+    addressParts.landmark && `near ${addressParts.landmark.trim()}`,
+    addressParts.pin,
+  ]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(', ')
+  const missingAddress = addressFields.find((field) =>
+    field.id === 'pin' ? !/^[1-9]\d{5}$/.test(addressParts.pin) : field.required && !addressParts[field.id].trim(),
+  )
+  const [missingField, setMissingField] = useState<AddressPart | ''>('')
 
   const matching = saathis?.filter((saathi) => saathi.services.includes(service.id)) ?? []
   const [choice, setChoice] = useState('')
@@ -154,12 +199,15 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
   const [error, setError] = useState('')
   const [state, setState] = useState<'idle' | 'saving' | 'sent' | 'failed'>('idle')
   const [picked, setPicked] = useState('')
+  const [failure, setFailure] = useState('')
 
   // Any new answer clears the last error, so a fixed problem never keeps showing.
-  const chooseDay = (value: string) => {
-    setDay(value as Day)
-    setSlot('')
-    setError('')
+  const pickDate = (date: Date) => {
+    // A time picked first is kept unless the new day can't take it (e.g. too soon today).
+    const dropped = slot !== '' && !slotsFor(date, now, lastStart).includes(Number(slot))
+    setVisitKey(dateKey(date))
+    setError(dropped ? `${slotLabel(Number(slot))} is too soon on that day. Please choose a later time.` : '')
+    if (dropped) setSlot('')
   }
   const chooseSlot = (value: string) => {
     setSlot(value)
@@ -184,7 +232,11 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
   const problem = (id: StepId) => {
     if (id === 'when' && !start) return 'Please choose a day and a start time.'
     if (id === 'when' && start && isTooSoon(start)) return 'That time has passed. Please choose a later time.'
-    if (id === 'where' && !location && address.trim().length < 3) return 'Please share your location or type the address.'
+    // Going back and choosing a longer plan can push a chosen time past the 11 pm finish.
+    if (id === 'when' && slot && Number(slot) > lastStart) {
+      return `Your ${hours}-hour visit must start by ${slotLabel(lastStart)} to end by 11 pm. Please choose an earlier time.`
+    }
+    if (id === 'where' && missingAddress) return missingAddress.message
     return ''
   }
 
@@ -195,7 +247,13 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
   }
   const next = () => {
     const issue = problem(step)
+    if (step === 'where' && missingAddress) {
+      // Point at the exact box that still needs filling.
+      setMissingField(missingAddress.id)
+      document.getElementById(`address-${missingAddress.id}`)?.focus()
+    }
     if (issue) return setError(issue)
+    setMissingField('')
     go(index + 1)
   }
 
@@ -227,7 +285,7 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
         hours: perVisit ? null : hours,
         preferredStart: start,
         location,
-        address: address.trim(),
+        address,
         message: note.trim(),
         serviceId: service.id,
         serviceName: service.name,
@@ -237,7 +295,12 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
       })
       setPicked(chosen ? `You asked for ${chosen.name}.` : saathi ? `We picked ${saathi.name} for you.` : '')
       setState('sent')
-    } catch {
+      // The confirmation replaces the form, so bring the top of it into view.
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    } catch (caught) {
+      // Firebase's own code (e.g. permission-denied) is what tells the team why a booking failed.
+      console.error('Booking could not be saved:', caught)
+      setFailure((caught as { code?: string })?.code ?? 'unknown')
       setState('failed')
     }
   }
@@ -246,20 +309,40 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
     { label: 'Service', value: service.name },
     { label: perVisit ? 'Visit' : 'How long', value: perVisit ? 'One visit' : hoursLabel(hours), edit: perVisit ? undefined : 'time' },
     { label: 'When', value: start ? friendlyWhen(start) : '', edit: 'when' },
-    { label: 'Where', value: address.trim() || (location ? 'Your shared location' : ''), edit: 'where' },
+    { label: 'Where', value: `${address}${location ? ' (location shared)' : ''}`, edit: 'where' },
     { label: 'Price', value: plan ? `${plan.price} · ${plan.name}` : '' },
   ]
 
   if (state === 'sent') {
     return (
-      <div className="rounded-3xl bg-white p-8 text-center shadow-[0_20px_50px_-30px_rgb(58_17_25/0.5)] ring-1 ring-gold/25 nav:p-12">
+      <div
+        role="status"
+        className="rounded-3xl bg-white p-8 text-center shadow-[0_20px_50px_-30px_rgb(58_17_25/0.5)] ring-1 ring-gold/25 nav:p-12"
+      >
         <span className="mx-auto grid size-16 place-items-center rounded-full bg-emerald-100 text-emerald-700">
           <CircleCheck aria-hidden className="size-9" strokeWidth={1.8} />
         </span>
-        <h2 className="mt-5 text-3xl font-light tracking-tight">Booking received</h2>
+        <h2 className="mt-5 text-3xl font-light tracking-tight">Your booking is confirmed</h2>
         <p className="mx-auto mt-2 max-w-md text-lg text-ink-muted">
-          {start && `${service.name}, ${friendlyWhen(start)}. `}
-          {picked} We will call to confirm, and your Saathi’s name and WhatsApp will appear on My bookings.
+          Thank you. Our team will contact you soon on {phoneValue.trim() || 'your number'}.
+        </p>
+        <dl className="mx-auto mt-6 grid max-w-md gap-2 rounded-2xl bg-blush/60 p-4 text-left">
+          {[
+            { label: 'Service', value: service.name },
+            { label: 'Plan', value: plan ? `${plan.name} · ${priceLabel(plan)}` : '' },
+            { label: 'When', value: start ? friendlyWhen(start) : '' },
+            { label: 'Where', value: address },
+          ]
+            .filter((row) => row.value)
+            .map((row) => (
+              <div key={row.label} className="flex gap-3">
+                <dt className="w-16 shrink-0 text-ink-muted">{row.label}</dt>
+                <dd className="font-semibold [overflow-wrap:anywhere]">{row.value}</dd>
+              </div>
+            ))}
+        </dl>
+        <p className="mx-auto mt-4 max-w-md text-sm text-ink-muted">
+          {picked} Your Saathi’s name and WhatsApp number will appear on My bookings once assigned.
         </p>
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <Link to="/bookings" className={primary}>
@@ -300,44 +383,38 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
 
         {step === 'time' && (
           <div className="grid gap-5">
+            {/* One option per companion plan, each naming the plan and price it books. */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {companionPlans.map(({ hours: value }) => (
-                <Choice key={value} name="hours" value={String(value)} checked={hours === value} onChange={(v) => setHours(Number(v))}>
-                  {wholeDayPlan?.hours === value ? (
-                    <>
-                      <Sun aria-hidden className="size-5" />
-                      Whole day
-                    </>
-                  ) : (
-                    `${value} hours`
-                  )}
+              {companionPlans.map((option) => (
+                <Choice
+                  key={option.id}
+                  name="hours"
+                  value={String(option.hours)}
+                  checked={hours === option.hours}
+                  onChange={(v) => setHours(Number(v))}
+                >
+                  {/* Same three rows in every card (length, plan, price) so they line up across the row. */}
+                  <span className="flex flex-col items-center self-stretch py-4 leading-tight">
+                    <span className="whitespace-nowrap text-lg">
+                      {wholeDayPlan?.hours === option.hours ? 'Whole day' : `${option.hours} hours`}
+                    </span>
+                    <span className="mt-1.5 flex min-h-10 items-center text-sm font-medium opacity-80 [text-wrap:balance]">
+                      {option.name}
+                    </span>
+                    <span className="mt-auto pt-2 text-base">{option.price}</span>
+                  </span>
                 </Choice>
               ))}
             </div>
-            <div className="flex items-center justify-between rounded-2xl bg-blush/60 p-2">
-              <button
-                type="button"
-                aria-label="One hour less"
-                disabled={hours <= MIN_HOURS}
-                onClick={() => setHours((value) => Math.max(MIN_HOURS, value - 1))}
-                className="grid size-14 place-items-center rounded-xl bg-white text-burgundy shadow-sm transition-colors hover:bg-burgundy hover:text-blush disabled:opacity-30"
-              >
-                <Minus aria-hidden className="size-6" />
-              </button>
-              <p aria-live="polite" className="text-center">
-                <span className="block text-xl font-semibold">{hoursLabel(hours)}</span>
-                {plan && <span className="block text-ink-muted">{plan.price} · {plan.name}</span>}
+            {plan && (
+              <p aria-live="polite" className="rounded-2xl bg-blush/60 px-5 py-4">
+                <span className="block text-lg font-semibold">
+                  {plan.name} · {plan.price}
+                  <span className="font-medium text-ink-muted"> / {plan.unit}</span>
+                </span>
+                <span className="mt-0.5 block text-ink-muted">{plan.description}</span>
               </p>
-              <button
-                type="button"
-                aria-label="One hour more"
-                disabled={hours >= MAX_HOURS}
-                onClick={() => setHours((value) => Math.min(MAX_HOURS, value + 1))}
-                className="grid size-14 place-items-center rounded-xl bg-white text-burgundy shadow-sm transition-colors hover:bg-burgundy hover:text-blush disabled:opacity-30"
-              >
-                <Plus aria-hidden className="size-6" />
-              </button>
-            </div>
+            )}
             {hours >= MAX_HOURS && (
               <p className="text-ink-muted">Need more than a day? Add a note at the end, or call {site.phoneDisplay}.</p>
             )}
@@ -346,45 +423,31 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
 
         {step === 'when' && (
           <div className="grid gap-6">
-            <div className="grid grid-cols-3 gap-3">
-              <Choice name="day" value="today" checked={day === 'today'} onChange={chooseDay} disabled={!todaySlots.length}>
-                <span className="leading-tight">
-                  Today
-                  <span className="block text-sm font-normal opacity-75">{shortDay(today)}</span>
-                </span>
-              </Choice>
-              <Choice name="day" value="tomorrow" checked={day === 'tomorrow'} onChange={chooseDay}>
-                <span className="leading-tight">
-                  Tomorrow
-                  <span className="block text-sm font-normal opacity-75">{shortDay(addDays(today, 1))}</span>
-                </span>
-              </Choice>
-              <Choice name="day" value="other" checked={day === 'other'} onChange={chooseDay}>
-                <CalendarDays aria-hidden className="size-5" />
-                Later
-              </Choice>
-            </div>
-            {!todaySlots.length && <p className="-mt-3 text-ink-muted">It is too late to book for today.</p>}
-            {day === 'other' && (
-              <label className="block">
-                <span className="mb-2 block font-semibold">Date</span>
-                <input
-                  type="date"
-                  value={otherDate}
-                  min={isoDate(addDays(today, 2))}
-                  max={isoDate(addDays(today, MAX_DAYS_AHEAD))}
-                  onChange={(event) => {
-                    setOtherDate(event.target.value)
-                    setSlot('')
-                    setError('')
-                  }}
-                  className={input}
-                />
-              </label>
-            )}
-            {visitDate &&
-              periods.map((period) => {
-                const inPeriod = slots.filter((minutes) => minutes >= period.from && minutes < period.to)
+            <section aria-labelledby="visit-date-heading" className="grid gap-3">
+              <h3 id="visit-date-heading" className="flex items-center gap-2 font-semibold">
+                <CalendarDays aria-hidden className="size-4 text-rosewood" />
+                Date
+              </h3>
+              <DateCalendar value={visitDate} today={today} min={firstDay} max={lastDay} onChange={(date) => pickDate(date)} />
+              {!todaySlots.length && <p className="text-ink-muted">It is too late to book for today.</p>}
+              {visitDate && (
+                <p className="font-semibold text-burgundy">
+                  {visitDate.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                </p>
+              )}
+            </section>
+
+            <h3 className="-mb-3 font-semibold">
+              Start time{' '}
+              <span className="font-normal text-ink-muted">
+                {perVisit
+                  ? '· visits start 7 am to 8 pm'
+                  : `· start by ${slotLabel(lastStart)} so your ${hours}-hour visit ends by 11 pm`}
+              </span>
+            </h3>
+            {/* Every time shows from the start; times the chosen day can't take are greyed out. */}
+            {periods.map((period) => {
+                const inPeriod = allSlots.filter((minutes) => minutes >= period.from && minutes < period.to)
                 if (!inPeriod.length) return null
                 return (
                   <fieldset key={period.label}>
@@ -394,7 +457,14 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
                     </legend>
                     <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                       {inPeriod.map((minutes) => (
-                        <Choice key={minutes} name="slot" value={String(minutes)} checked={slot === String(minutes)} onChange={chooseSlot}>
+                        <Choice
+                          key={minutes}
+                          name="slot"
+                          value={String(minutes)}
+                          checked={slot === String(minutes)}
+                          disabled={!slots.includes(minutes)}
+                          onChange={chooseSlot}
+                        >
                           {slotLabel(minutes)}
                         </Choice>
                       ))}
@@ -430,29 +500,45 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
             )}
             {(locating === 'denied' || locating === 'unavailable') && (
               <p role="status" className="text-ink-muted">
-                {locating === 'denied' ? 'Location is turned off.' : 'We could not find your location.'} Please type the address
-                instead.
+                {locating === 'denied' ? 'Location is turned off.' : 'We could not find your location.'} That’s fine; the
+                address below is enough.
               </p>
             )}
-            <div className="flex items-center gap-3 text-sm text-ink-muted">
-              <span className="h-px grow bg-burgundy/10" />
-              or type it
-              <span className="h-px grow bg-burgundy/10" />
+            {!location && (
+              <p className="-mt-2 text-sm text-ink-muted">Optional, but it helps your Saathi find the right door.</p>
+            )}
+            <h3 className="mt-2 flex items-center gap-2 font-semibold">
+              <MapPin aria-hidden className="size-4 text-rosewood" />
+              Address
+            </h3>
+            {/* The address is always required; the shared location above only adds precision. */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              {addressFields.map((field) => (
+                <label key={field.id} className={`block ${field.wide ? 'sm:col-span-2' : ''}`}>
+                  <span className="mb-1.5 block text-sm font-semibold">
+                    {field.label}
+                    {!field.required && <span className="font-normal text-ink-muted"> (optional)</span>}
+                  </span>
+                  <input
+                    id={`address-${field.id}`}
+                    value={addressParts[field.id]}
+                    onChange={(event) => {
+                      const value = field.id === 'pin' ? event.target.value.replace(/\D/g, '').slice(0, 6) : event.target.value
+                      setAddressParts((current) => ({ ...current, [field.id]: value }))
+                      if (missingField === field.id) setMissingField('')
+                      setError('')
+                    }}
+                    required={field.required}
+                    maxLength={field.maxLength}
+                    inputMode={field.id === 'pin' ? 'numeric' : undefined}
+                    autoComplete={field.autoComplete}
+                    placeholder={field.placeholder}
+                    aria-invalid={missingField === field.id}
+                    className={`${input} aria-invalid:border-[#b3261e]`}
+                  />
+                </label>
+              ))}
             </div>
-            <label className="relative block">
-              <span className="sr-only">Address or landmark</span>
-              <MapPin aria-hidden className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-rosewood" />
-              <input
-                value={address}
-                onChange={(event) => {
-                  setAddress(event.target.value)
-                  setError('')
-                }}
-                autoComplete="street-address"
-                placeholder="House, street, area or landmark"
-                className={`${input} pl-12`}
-              />
-            </label>
           </div>
         )}
 
@@ -527,7 +613,9 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
                   />
                 </label>
                 <ErrorText>{error}</ErrorText>
-                {state === 'failed' && <ErrorText>{`We could not send your booking. Please try again or call ${site.phoneDisplay}.`}</ErrorText>}
+                {state === 'failed' && (
+                  <ErrorText>{`We could not send your booking. Please try again or call ${site.phoneDisplay}. (Reason: ${failure})`}</ErrorText>
+                )}
                 <button type="submit" disabled={state === 'saving'} className={`${primary} mt-2 w-full`}>
                   {state === 'saving' ? 'Booking…' : `Confirm booking${plan ? ` · ${plan.price}` : ''}`}
                 </button>
