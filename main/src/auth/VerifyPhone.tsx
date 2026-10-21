@@ -6,10 +6,15 @@ import { useAuth } from './context'
 import { OtpInput } from './OtpInput'
 
 const messages: Record<string, string> = {
+  'auth/invalid-app-credential':
+    'The security check could not be completed. If you use an ad blocker or Brave Shields, turn it off for this site, then reload and try again. Or use Google instead.',
+  'auth/missing-app-credential': 'The security check could not be completed. Please reload the page and try again.',
+  // Firebase's code when it refuses to text a number it considers risky (SMS fraud protection).
+  'auth/error-code:-39': 'We could not send a code to this number right now. Please try again later, or use Google.',
   'auth/invalid-phone-number': 'That mobile number does not look right.',
   'auth/invalid-verification-code': 'That code is incorrect. Please check and try again.',
   'auth/code-expired': 'That code has expired. Please request a new one.',
-  'auth/too-many-requests': 'Too many attempts. Please wait a few minutes and try again.',
+  'auth/too-many-requests': 'Too many attempts from this number or device. Please wait about an hour and try again, or use Google.',
   'auth/quota-exceeded': 'Too many codes have been sent today. Please try again tomorrow.',
   'auth/captcha-check-failed': 'The security check failed. Please reload the page and try again.',
   'auth/credential-already-in-use':
@@ -24,7 +29,8 @@ const messages: Record<string, string> = {
 function describe(error: unknown) {
   const code = (error as { code?: string })?.code ?? ''
   console.warn('Phone verification failed:', code || error, (error as Error)?.message ?? '')
-  return messages[code] ?? 'Something went wrong. Please try again.'
+  // The code stays visible so an unexpected problem can be reported and fixed, not guessed at.
+  return messages[code] ?? `Something went wrong. Please try again. (${code || 'unknown error'})`
 }
 
 const field =

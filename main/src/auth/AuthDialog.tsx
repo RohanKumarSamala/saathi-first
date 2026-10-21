@@ -33,8 +33,13 @@ import { sendVerification } from './verify'
 export type Method = 'phone' | 'email'
 
 const messages: Record<string, string> = {
+  'auth/invalid-app-credential':
+    'The security check could not be completed. If you use an ad blocker or Brave Shields, turn it off for this site, then reload and try again. Or use Google instead.',
+  'auth/missing-app-credential': 'The security check could not be completed. Please reload the page and try again.',
+  // Firebase's code when it refuses to text a number it considers risky (SMS fraud protection).
+  'auth/error-code:-39': 'We could not send a code to this number right now. Please try again later, or use Google.',
   'auth/invalid-phone-number': 'That mobile number does not look right.',
-  'auth/too-many-requests': 'Too many attempts. Please wait a few minutes and try again.',
+  'auth/too-many-requests': 'Too many attempts from this number or device. Please wait about an hour and try again, or use Google.',
   'auth/invalid-verification-code': 'That code is incorrect. Please check and try again.',
   'auth/code-expired': 'That code has expired. Please request a new one.',
   // Firebase gives the same error for a wrong password and for an account that only uses Google.
@@ -70,7 +75,8 @@ function describe(error: unknown) {
   const code = (error as { code?: string })?.code ?? ''
   // The exact Firebase code helps the team fix setup problems; visitors see plain words.
   console.warn('Sign-in failed:', code || error, (error as Error)?.message ?? '')
-  return messages[code] ?? 'Something went wrong. Please try again.'
+  // The code stays visible so an unexpected problem can be reported and fixed, not guessed at.
+  return messages[code] ?? `Something went wrong. Please try again. (${code || 'unknown error'})`
 }
 
 const inputClass =
