@@ -124,6 +124,30 @@ service and the customer's choice are marked), confirm their WhatsApp number and
 customer paid). The Saathi's number is stored on that booking only, so only
 that customer and admins can see it; it never appears on the public Our Saathis page.
 
+### Monthly memberships
+
+Basic, Silver and Premium Care (`memberships` in `main/src/content/site.ts`) give 4, 8 or 16 free
+visits each calendar month, up to 2 hours each, for the services the plan includes (`servicePlans`).
+Unused visits expire at the month's end.
+
+1. **Buying:** the customer taps Choose plan on Our Plans (WhatsApp; the message carries their customer
+   ID when signed in) and pays the office.
+2. **Switching on:** in the admin website's **Memberships** tab, pick the customer (or paste the customer ID
+   from their My profile page), the plan, start date and months paid. Renew, Stop/Resume and correct a
+   month's count from the same tab. Stored at `memberships/{customer uid}`.
+3. **Booking:** the booking form offers **Use my membership · Free** first when the plan covers the
+   service. The booking is saved with `paidBy: 'membership'` on the 2-hour plan, and the same write adds
+   one to that month's count; `firestore.rules` refuse it past the monthly limit, outside the valid
+   dates, or for a service the plan does not cover. Cancelling (customer or admin) gives the visit back.
+4. **Profile:** My profile shows the plan, visits left this month and the valid-until date.
+5. **Saathi pay:** the Saathi completes a membership visit with nothing collected. Its collection has
+   `method: 'membership'` and a **negative** company share (minus the Saathi's usual share), so the
+   ledger and the payment server net it off: the company owes the Saathi. Admins record what they pay
+   out with **Record a payout** on the Saathis tab (a settlement with a negative amount).
+
+Logic: `main/src/lib/membership.ts`, `buildCollection` and `ledger` in `main/src/lib/finance.ts`.
+Tests: the `memberships` block in `tests/firestore.rules.test.js`.
+
 ### Security rules tests
 
 `firestore.rules` checks who may write **and** exactly what they may write (fields, types, lengths,

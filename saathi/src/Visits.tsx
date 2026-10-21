@@ -1,4 +1,4 @@
-import { AlertTriangle, CalendarClock, Hourglass, MessageCircle, MessageSquareText, Navigation, Phone, Play } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Crown, Hourglass, MessageCircle, MessageSquareText, Navigation, Phone, Play } from 'lucide-react'
 import { useState } from 'react'
 import { CollectionForm } from '../../main/src/components/CollectionForm'
 import { callLink, friendlyWhen, whatsappLink } from '../../main/src/lib/contact'
@@ -102,6 +102,13 @@ function VisitCard({ row, percent }: { row: Stored<Booking>; percent: number }) 
           </p>
         )}
 
+        {row.paidBy === 'membership' && (
+          <p className="flex items-center gap-2 rounded-xl bg-gold/25 px-3 py-2 text-sm font-semibold">
+            <Crown aria-hidden className="size-4 shrink-0 text-burgundy" />
+            Membership visit: do not collect money. Saathi First pays your share.
+          </p>
+        )}
+
         {row.extraHoursRequested && (
           <p className="flex items-center gap-2 rounded-xl bg-gold/25 px-3 py-2 text-sm font-medium">
             <Hourglass aria-hidden className="size-4 shrink-0 text-burgundy" />
@@ -135,7 +142,7 @@ function VisitCard({ row, percent }: { row: Stored<Booking>; percent: number }) 
               onClick={() => setFinishing(true)}
               className="h-12 rounded-xl bg-burgundy font-semibold text-blush transition-colors hover:bg-wine"
             >
-              Complete visit &amp; record payment
+              {row.paidBy === 'membership' ? 'Complete visit' : <>Complete visit &amp; record payment</>}
             </button>
           </div>
         )}
@@ -159,13 +166,20 @@ function DoneCard({ row, outstandingPaise }: { row: Stored<Booking>; outstanding
           {row.completedAt ? friendlyWhen(row.completedAt.toDate()) : ''}
         </p>
       </div>
-      {c && (
+      {c && c.method === 'membership' ? (
         <div className="shrink-0 text-right">
-          <p className="font-semibold">{formatRupees(c.totalPaise)}</p>
-          <p className={`text-xs font-semibold ${outstandingPaise ? 'text-rosewood' : 'text-emerald-700'}`}>
-            {outstandingPaise ? `${formatRupees(outstandingPaise)} to pay` : 'Settled'}
-          </p>
+          <p className="font-semibold">{formatRupees(c.saathiSharePaise)}</p>
+          <p className="text-xs font-semibold text-emerald-700">Membership · you earn</p>
         </div>
+      ) : (
+        c && (
+          <div className="shrink-0 text-right">
+            <p className="font-semibold">{formatRupees(c.totalPaise)}</p>
+            <p className={`text-xs font-semibold ${outstandingPaise ? 'text-rosewood' : 'text-emerald-700'}`}>
+              {outstandingPaise ? `${formatRupees(outstandingPaise)} to pay` : 'Settled'}
+            </p>
+          </div>
+        )
       )}
     </li>
   )

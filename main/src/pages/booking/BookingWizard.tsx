@@ -5,19 +5,30 @@ import {
   CalendarDays,
   CircleCheck,
   Clock,
+  Crown,
   LocateFixed,
   MapPin,
   Pencil,
 } from 'lucide-react'
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { AuthGate } from '../../auth/AuthGate'
 import { useAuth } from '../../auth/context'
-import { plans, site, type Service } from '../../content/site'
+import { plans, services, site, type Service } from '../../content/site'
 import { friendlyWhen } from '../../lib/contact'
-import { dateKey, fromIndiaWallClock, indiaWallClock, outsideIndiaTime } from '../../lib/dates'
+import { dateKey, fromIndiaWallClock, indiaWallClock, monthKey, outsideIndiaTime } from '../../lib/dates'
+import { useMembershipState } from '../../hooks/useMembership'
+import { isActiveOn, MEMBERSHIP_HOURS, monthName, servicesCoveredBy, visitsLeft } from '../../lib/membership'
 import { DateCalendar } from './DateCalendar'
-import { createBooking, MAX_ACTIVE_BOOKINGS, type Saathi, type SharedLocation, type Stored } from '../../lib/db'
+import {
+  createBooking,
+  MAX_ACTIVE_BOOKINGS,
+  watchMyBookings,
+  type Booking,
+  type Saathi,
+  type SharedLocation,
+  type Stored,
+} from '../../lib/db'
 import { isValidIndianMobile } from '../../lib/enquiry'
 import {
   companionPlans,
@@ -50,6 +61,16 @@ const addDays = (date: Date, days: number) => new Date(date.getFullYear(), date.
 const NOTICE_AT_CONFIRM_MINUTES = 60
 const pickAtRandom = <T,>(list: T[]): T | undefined => list[Math.floor(Math.random() * list.length)]
 const isTooSoon = (moment: Date) => moment.getTime() < Date.now() + NOTICE_AT_CONFIRM_MINUTES * 60_000
+
+/** The signed-in customer's own bookings, live; empty when signed out or unreadable. */
+function useMyBookings(uid: string | undefined) {
+  const [rows, setRows] = useState<Stored<Booking>[]>([])
+  useEffect(() => {
+    if (!uid) return
+    return watchMyBookings(uid, setRows, () => setRows([]))
+  }, [uid])
+  return uid ? rows : []
+}
 
 function slotLabel(minutes: number) {
   const hours = Math.floor(minutes / 60)
@@ -140,23 +161,60 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
   const { user } = useAuth()
   const [params] = useSearchParams()
   const perVisit = isPerVisitService(service.id)
-  const stepIds: StepId[] = perVisit ? ['when', 'where', 'confirm'] : ['time', 'when', 'where', 'confirm']
   const [index, setIndex] = useState(0)
-  const step = stepIds[index]
 
   // A plan picked on the Plans page arrives as ?plan= and sets the starting hours.
   const fromPlans = plans.find((plan) => plan.id === params.get('plan'))
   const [hours, setHours] = useState(fromPlans?.hours ?? companionPlans[0]?.hours ?? MIN_HOURS)
-  const plan = perVisit ? propertyPlan : planForHours(hours)
+
+  // A member whose plan covers this service, with free visits left (this month, or in a later
+  // month the membership still covers), books it free: no plan to choose, nothing to pay.
+  const { membership, error: membershipError } = useMembershipState()
+  const [realNow] = useState(() => new Date())
+  // Why a member cannot use their membership for this booking, in their words ('' when they can).
+  const membershipBlock = (() => {
+    if (!membership || perVisit) return ''
+    const date = (timestamp: { toDate: () => Date }) =>
+      timestamp.toDate().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+    if (membership.status !== 'active') return `Your ${membership.planName} membership is stopped, so this visit is paid.`
+    if (membership.validUntil.toMillis() <= realNow.getTime()) {
+      return `Your ${membership.planName} membership ended on ${date(membership.validUntil)}, so this visit is paid.`
+    }
+    const covered = servicesCoveredBy(membership.planId)
+    if (!covered.includes(service.id)) {
+      const names = covered.map((id) => services.find((item) => item.id === id)?.name).filter(Boolean)
+      return `Your ${membership.planName} membership does not include ${service.name}, so this visit is paid. It covers: ${names.join(', ')}.`
+    }
+    if (visitsLeft(membership, realNow) === 0 && monthKey(membership.validUntil.toDate()) === monthKey(realNow)) {
+      return `You have used all ${membership.visitsPerMonth} membership visits for ${monthName(realNow)}, so this visit is paid.`
+    }
+    return ''
+  })()
+  const memberCanUse = Boolean(membership && !perVisit && !membershipBlock)
+  const [payWith, setPayWith] = useState<'membership' | 'plan' | null>(null)
+  // Whichever Book now brought them here, members start on the free visit. This happens only on
+  // the first step, so signing in later never reshuffles the steps under them.
+  if (payWith === null && memberCanUse && index === 0) setPayWith('membership')
+  const usingMembership = memberCanUse && payWith === 'membership'
+  // A membership visit is always 2 hours, so it skips the "How long" step.
+  const stepIds: StepId[] = perVisit || usingMembership ? ['when', 'where', 'confirm'] : ['time', 'when', 'where', 'confirm']
+  const step = stepIds[Math.min(index, stepIds.length - 1)]
+  const visitHours = usingMembership ? MEMBERSHIP_HOURS : hours
+  const plan = perVisit ? propertyPlan : usingMembership ? planForHours(MEMBERSHIP_HOURS) : planForHours(hours)
 
   // India's date and time, wherever the visitor is: the calendar and times are Hyderabad's.
   const [now] = useState(() => indiaWallClock())
   const today = useMemo(() => addDays(now, 0), [now])
   // The latest start that still ends the visit by 11 pm.
-  const lastStart = perVisit ? PER_VISIT_LAST_SLOT : LATEST_END - hours * 60
+  const lastStart = perVisit ? PER_VISIT_LAST_SLOT : LATEST_END - visitHours * 60
   const todaySlots = slotsFor(today, now, lastStart)
   const firstDay = todaySlots.length ? today : addDays(today, 1)
-  const lastDay = addDays(today, MAX_DAYS_AHEAD)
+  // A membership visit must fall within the membership's dates.
+  const memberUntil = usingMembership && membership ? indiaWallClock(membership.validUntil.toDate()) : null
+  const lastDay =
+    memberUntil && memberUntil < addDays(today, MAX_DAYS_AHEAD)
+      ? new Date(memberUntil.getFullYear(), memberUntil.getMonth(), memberUntil.getDate())
+      : addDays(today, MAX_DAYS_AHEAD)
   const [visitKey, setVisitKey] = useState('')
   const [slot, setSlot] = useState('')
   const visitDate = visitKey ? new Date(`${visitKey}T00:00`) : null
@@ -193,6 +251,24 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
   const [missingField, setMissingField] = useState<AddressPart | ''>('')
 
   const matching = saathis?.filter((saathi) => saathi.services.includes(service.id)) ?? []
+  // Saathis from this customer's earlier bookings (the one who came, or else the one suggested),
+  // most recent first, so they can ask for someone they know again. Any listed Saathi counts,
+  // even one who usually offers other services; the team checks when assigning.
+  const myBookings = useMyBookings(user?.uid)
+  const pastSaathis = [
+    ...new Set(
+      myBookings
+        .filter((row) => row.status !== 'cancelled')
+        .map((row) => row.assignedSaathiId || row.saathiId || '')
+        .filter(Boolean),
+    ),
+  ]
+    .map((id) => saathis?.find((saathi) => saathi.id === id))
+    .filter((saathi): saathi is Stored<Saathi> => Boolean(saathi))
+  const visitedBy = new Set(myBookings.filter((row) => row.status === 'completed').map((row) => row.assignedSaathiId))
+  // '' means "any available Saathi"; otherwise the id of a past Saathi to ask for again.
+  const [wantedId, setWantedId] = useState('')
+  const wanted = pastSaathis.find((saathi) => saathi.id === wantedId)
   // Null until edited, so the signed-in account's name and number fill in by default.
   const [name, setName] = useState<string | null>(null)
   const [phone, setPhone] = useState<string | null>(null)
@@ -204,6 +280,20 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
   const [state, setState] = useState<'idle' | 'saving' | 'sent' | 'failed'>('idle')
   const [picked, setPicked] = useState('')
   const [failure, setFailure] = useState('')
+  // Set once a free visit is booked, so the confirmation stays "free" even after it used the last visit.
+  const [bookedFree, setBookedFree] = useState(false)
+
+  /**
+   * Swap between a free membership visit and a paid one, staying on the same question where both
+   * flows have it. Paying means choosing how long, so that goes back to the first step.
+   */
+  const switchTo = (mode: 'membership' | 'plan') => {
+    const next: StepId[] = mode === 'membership' ? ['when', 'where', 'confirm'] : ['time', 'when', 'where', 'confirm']
+    setPayWith(mode)
+    setError('')
+    setIndex(mode === 'plan' ? 0 : Math.max(next.indexOf(step), 0))
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 
   // Any new answer clears the last error, so a fixed problem never keeps showing.
   const pickDate = (date: Date) => {
@@ -240,7 +330,15 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
     }
     // Going back and choosing a longer plan can push a chosen time past the 11 pm finish.
     if (id === 'when' && slot && Number(slot) > lastStart) {
-      return `Your ${hours}-hour visit must start by ${slotLabel(lastStart)} to end by 11 pm. Please choose an earlier time.`
+      return `Your ${visitHours}-hour visit must start by ${slotLabel(lastStart)} to end by 11 pm. Please choose an earlier time.`
+    }
+    if (id === 'when' && usingMembership && membership && startAt) {
+      if (!isActiveOn(membership, startAt)) {
+        return `Your membership covers visits until ${membership.validUntil.toDate().toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })}. Please choose an earlier date, or a paid plan.`
+      }
+      if (visitsLeft(membership, startAt) === 0) {
+        return `You have used all ${membership.visitsPerMonth} membership visits for ${monthName(startAt)}. Choose a date in another month, or book a paid visit instead (link above).`
+      }
     }
     if (id === 'where' && missingAddress) return missingAddress.message
     return ''
@@ -276,8 +374,9 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
     if (!isValidIndianMobile(phoneValue)) return setError('Please enter a valid 10-digit mobile number.')
     if (!user || !plan || !startAt) return
 
-    // Customers do not pick a Saathi: one who offers this service is chosen at random.
-    const saathi = pickAtRandom(matching)
+    // A Saathi the customer has had before, if they asked for one; otherwise one who offers this
+    // service, chosen at random.
+    const saathi = wanted ?? pickAtRandom(matching)
     setError('')
     setState('saving')
     try {
@@ -288,7 +387,8 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
         planId: plan.id,
         planName: plan.name,
         planPrice: priceLabel(plan),
-        hours: perVisit ? null : hours,
+        hours: perVisit ? null : visitHours,
+        ...(usingMembership ? { paidBy: 'membership' as const } : {}),
         preferredStart: startAt,
         location,
         address,
@@ -297,11 +397,12 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
         serviceName: service.name,
         saathiId: saathi?.id ?? '',
         saathiName: saathi?.name ?? '',
-        saathiChoice: saathi ? 'random' : 'none',
+        saathiChoice: wanted ? 'chosen' : saathi ? 'random' : 'none',
       })
       // Remember the name for next time (it shows on My profile), unless they already have one.
       if (!user.displayName) void updateProfile(user, { displayName: nameValue.trim() }).catch(() => undefined)
-      setPicked(saathi ? `We picked ${saathi.name} for you.` : '')
+      setPicked(wanted ? `We have asked ${wanted.name} to come again.` : saathi ? `We picked ${saathi.name} for you.` : '')
+      setBookedFree(usingMembership)
       setState('sent')
       // The confirmation replaces the form, so bring the top of it into view.
       window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -315,11 +416,15 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
 
   const recap: { label: string; value: string; edit?: StepId }[] = [
     { label: 'Service', value: service.name },
-    { label: perVisit ? 'Visit' : 'How long', value: perVisit ? 'One visit' : hoursLabel(hours), edit: perVisit ? undefined : 'time' },
+    { label: perVisit ? 'Visit' : 'How long', value: perVisit ? 'One visit' : hoursLabel(visitHours), edit: perVisit || usingMembership ? undefined : 'time' },
     { label: 'When', value: startAt ? friendlyWhen(startAt) : '', edit: 'when' },
     { label: 'Where', value: `${address}${location ? ' (location shared)' : ''}`, edit: 'where' },
-    { label: 'Price', value: plan ? `${plan.price} · ${plan.name}` : '' },
+    {
+      label: 'Price',
+      value: usingMembership && membership ? `Free · ${membership.planName} membership` : plan ? `${plan.price} · ${plan.name}` : '',
+    },
   ]
+  const priceNote = usingMembership ? 'Free with membership' : plan?.price
 
   if (state === 'sent') {
     return (
@@ -337,7 +442,12 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
         <dl className="mx-auto mt-6 grid max-w-md gap-2 rounded-2xl bg-blush/60 p-4 text-left">
           {[
             { label: 'Service', value: service.name },
-            { label: 'Plan', value: plan ? `${plan.name} · ${priceLabel(plan)}` : '' },
+            {
+              label: 'Plan',
+              value: bookedFree && membership
+                ? `Membership visit · free (${membership.planName})`
+                : plan ? `${plan.name} · ${priceLabel(plan)}` : '',
+            },
             { label: 'When', value: startAt ? friendlyWhen(startAt) : '' },
             { label: 'Where', value: address },
           ]
@@ -349,6 +459,12 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
               </div>
             ))}
         </dl>
+        {bookedFree && membership && (
+          <p className="mx-auto mt-4 flex max-w-md items-center justify-center gap-2 rounded-2xl bg-gold/20 px-4 py-3 font-semibold">
+            <Crown aria-hidden className="size-5 shrink-0 text-rosewood" />
+            {visitsLeft(membership, startAt ?? realNow)} of {membership.visitsPerMonth} free visits left in {monthName(startAt ?? realNow)}
+          </p>
+        )}
         <p className="mx-auto mt-4 max-w-md text-sm text-ink-muted">
           {picked} Your Saathi’s name and WhatsApp number will appear on My bookings once assigned.
         </p>
@@ -384,6 +500,48 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
         </p>
       </div>
 
+      {usingMembership && membership && (
+        <div role="status" className="mb-5 rounded-3xl bg-[linear-gradient(135deg,#6b1e2e,#8f2f42_60%,#b9545c)] p-5 text-blush shadow-card nav:p-6">
+          <p className="flex items-center gap-2 text-lg font-semibold">
+            <Crown aria-hidden className="size-5 shrink-0 text-gold" />
+            This visit is part of your {membership.planName} membership
+          </p>
+          <p className="mt-1 text-blush/85">
+            Free · 2-hour visit · {visitsLeft(membership, startAt ?? realNow)} of {membership.visitsPerMonth} visits left in{' '}
+            {monthName(startAt ?? realNow)}. Just choose the date and time, and tell us where to come.
+          </p>
+          <button
+            type="button"
+            onClick={() => switchTo('plan')}
+            className="mt-3 text-sm font-semibold text-gold underline decoration-gold/50 underline-offset-4 hover:decoration-gold"
+          >
+            Need longer than 2 hours? Book a paid visit instead
+          </button>
+        </div>
+      )}
+      {/* Members are told why this visit is not free, so a paid screen never looks like a mistake. */}
+      {(membershipBlock || membershipError) && (
+        <p role="status" className="mb-5 flex items-start gap-3 rounded-3xl bg-gold/20 p-4 font-medium ring-1 ring-gold/40">
+          <Crown aria-hidden className="mt-0.5 size-5 shrink-0 text-burgundy" />
+          <span>
+            {membershipBlock ||
+              `We could not check your membership just now (${membershipError}). Refresh the page; if this keeps happening, please call ${site.phoneDisplay}.`}
+          </span>
+        </p>
+      )}
+      {/* A member who signed in only at the end, or switched to paying, can still make it free. */}
+      {!usingMembership && memberCanUse && membership && step !== 'time' && (
+        <div className="mb-5 flex flex-wrap items-center gap-3 rounded-3xl bg-gold/20 p-4 ring-1 ring-gold/40">
+          <Crown aria-hidden className="size-6 shrink-0 text-burgundy" />
+          <p className="grow font-medium">
+            Your {membership.planName} membership covers this service: {visitsLeft(membership, startAt ?? realNow)} free visits left.
+          </p>
+          <button type="button" onClick={() => switchTo('membership')} className={`${primary} min-h-12 px-5 text-base`}>
+            Make this a free visit
+          </button>
+        </div>
+      )}
+
       <section aria-labelledby="step-title" className="rounded-3xl bg-white p-6 shadow-[0_20px_50px_-30px_rgb(58_17_25/0.5)] ring-1 ring-gold/25 nav:p-8">
         <h2 id="step-title" className="mb-6 text-2xl font-normal tracking-tight nav:text-3xl">
           {title[step]}
@@ -391,6 +549,31 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
 
         {step === 'time' && (
           <div className="grid gap-5">
+            {memberCanUse && membership && (
+              <>
+                <label className={`${chip.replace('justify-center', 'justify-start').replace('text-center', 'text-left')} min-h-20 gap-4 px-5`}>
+                  <input
+                    type="radio"
+                    name="hours"
+                    value="membership"
+                    checked={usingMembership}
+                    onChange={() => switchTo('membership')}
+                    className="sr-only"
+                  />
+                  <Crown aria-hidden className="size-7 shrink-0 text-gold" />
+                  <span className="grow leading-tight">
+                    <span className="block text-lg">Use my membership · Free</span>
+                    <span className="mt-1 block text-sm font-medium opacity-80">
+                      {membership.planName} · 2-hour visit · {visitsLeft(membership, realNow)} of {membership.visitsPerMonth} visits left in{' '}
+                      {monthName(realNow)}
+                    </span>
+                  </span>
+                </label>
+                <p className="-mt-2 flex items-center gap-3 text-sm font-semibold text-ink-muted before:h-px before:grow before:bg-burgundy/15 after:h-px after:grow after:bg-burgundy/15">
+                  or pay for a visit
+                </p>
+              </>
+            )}
             {/* One option per companion plan, each naming the plan and price it books. */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {companionPlans.map((option) => (
@@ -398,8 +581,11 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
                   key={option.id}
                   name="hours"
                   value={String(option.hours)}
-                  checked={hours === option.hours}
-                  onChange={(v) => setHours(Number(v))}
+                  checked={!usingMembership && hours === option.hours}
+                  onChange={(v) => {
+                    setHours(Number(v))
+                    setPayWith('plan')
+                  }}
                 >
                   {/* Same three rows in every card (length, plan, price) so they line up across the row. */}
                   <span className="flex flex-col items-center self-stretch py-4 leading-tight">
@@ -414,16 +600,25 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
                 </Choice>
               ))}
             </div>
-            {plan && (
+            {usingMembership && membership ? (
               <p aria-live="polite" className="rounded-2xl bg-blush/60 px-5 py-4">
-                <span className="block text-lg font-semibold">
-                  {plan.name} · {plan.price}
-                  <span className="font-medium text-ink-muted"> / {plan.unit}</span>
+                <span className="block text-lg font-semibold">Membership visit · Free</span>
+                <span className="mt-0.5 block text-ink-muted">
+                  Up to 2 hours, paid by your {membership.planName} membership. Nothing to pay the Saathi.
                 </span>
-                <span className="mt-0.5 block text-ink-muted">{plan.description}</span>
               </p>
+            ) : (
+              plan && (
+                <p aria-live="polite" className="rounded-2xl bg-blush/60 px-5 py-4">
+                  <span className="block text-lg font-semibold">
+                    {plan.name} · {plan.price}
+                    <span className="font-medium text-ink-muted"> / {plan.unit}</span>
+                  </span>
+                  <span className="mt-0.5 block text-ink-muted">{plan.description}</span>
+                </p>
+              )
             )}
-            {hours >= MAX_HOURS && (
+            {!usingMembership && hours >= MAX_HOURS && (
               <p className="text-ink-muted">Need more than a day? Add a note at the end, or call {site.phoneDisplay}.</p>
             )}
           </div>
@@ -455,7 +650,7 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
               <span className="font-normal text-ink-muted">
                 {perVisit
                   ? '· visits start 7 am to 8 pm'
-                  : `· start by ${slotLabel(lastStart)} so your ${hours}-hour visit ends by 11 pm`}
+                  : `· start by ${slotLabel(lastStart)} so your ${visitHours}-hour visit ends by 11 pm`}
               </span>
             </h3>
             {/* Every time shows from the start; times the chosen day can't take are greyed out. */}
@@ -610,6 +805,38 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
                     className={`${input} h-auto resize-y py-3`}
                   />
                 </label>
+                {pastSaathis.length > 0 && (
+                  <fieldset>
+                    <legend className="mb-2 font-semibold">Your Saathi</legend>
+                    <div className="grid gap-2">
+                      {[{ id: '', label: 'Any available Saathi' }, ...pastSaathis.map((saathi) => ({ id: saathi.id, label: `${saathi.name} again` }))].map(
+                        (option) => (
+                          <label
+                            key={option.id || 'any'}
+                            className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-xl px-4 ring-1 transition-colors ${
+                              wantedId === option.id ? 'bg-burgundy/5 ring-burgundy' : 'ring-burgundy/20 hover:bg-burgundy/5'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="saathi"
+                              checked={wantedId === option.id}
+                              onChange={() => setWantedId(option.id)}
+                              className="size-4 accent-burgundy"
+                            />
+                            <span className="font-medium">{option.label}</span>
+                            {option.id && (
+                              <span className="ml-auto text-right text-sm text-ink-muted">
+                                {visitedBy.has(option.id) ? 'visited you before' : 'from an earlier booking'}
+                              </span>
+                            )}
+                          </label>
+                        ),
+                      )}
+                    </div>
+                    <p className="mt-2 text-sm text-ink-muted">We will try to send them. If they are busy, another Saathi will come.</p>
+                  </fieldset>
+                )}
                 <ErrorText>{error}</ErrorText>
                 {state === 'failed' && failure === 'too-many-active' && (
                   <p role="alert" className="mt-4 rounded-xl bg-gold/25 px-4 py-3 font-medium">
@@ -625,7 +852,7 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
                   <ErrorText>{`We could not send your booking. Please try again or call ${site.phoneDisplay}. (Reason: ${failure})`}</ErrorText>
                 )}
                 <button type="submit" disabled={state === 'saving'} className={`${primary} mt-2 w-full`}>
-                  {state === 'saving' ? 'Booking…' : `Confirm booking${plan ? ` · ${plan.price}` : ''}`}
+                  {state === 'saving' ? 'Booking…' : `Confirm booking${priceNote ? ` · ${priceNote}` : ''}`}
                 </button>
                 <p className="text-center text-sm text-ink-muted">We will call you to confirm before your Saathi comes.</p>
               </form>

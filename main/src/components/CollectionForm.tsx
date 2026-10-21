@@ -1,4 +1,4 @@
-import { Banknote, Check, QrCode } from 'lucide-react'
+import { Banknote, Check, Crown, QrCode } from 'lucide-react'
 import { useId, useState, type FormEvent } from 'react'
 import type { Booking } from '../lib/db'
 import {
@@ -11,7 +11,7 @@ import {
   type PaymentMethod,
 } from '../lib/finance'
 
-const methods: { id: PaymentMethod; label: string; icon: typeof QrCode }[] = [
+const methods: { id: Exclude<PaymentMethod, 'membership'>; label: string; icon: typeof QrCode }[] = [
   { id: 'upi', label: 'UPI / QR', icon: QrCode },
   { id: 'cash', label: 'Cash', icon: Banknote },
 ]
@@ -25,12 +25,86 @@ const field =
  * website, and by admins completing a visit for a Saathi.
  */
 export function CollectionForm({ booking, commissionPercent, onSave, onCancel, by = 'saathi' }: {
-  booking: Pick<Booking, 'planId' | 'planName'>
+  booking: Pick<Booking, 'planId' | 'planName' | 'paidBy'>
   commissionPercent: number
   onSave: (collection: Collection) => Promise<void>
   onCancel: () => void
   by?: 'saathi' | 'admin'
 }) {
+  if (booking.paidBy === 'membership') {
+    return <MembershipCompletion booking={booking} commissionPercent={commissionPercent} onSave={onSave} onCancel={onCancel} by={by} />
+  }
+  return <PaidCompletion booking={booking} commissionPercent={commissionPercent} onSave={onSave} onCancel={onCancel} by={by} />
+}
+
+type CompletionProps = Parameters<typeof CollectionForm>[0] & { by: 'saathi' | 'admin' }
+
+/**
+ * A membership visit: the customer's membership paid, so nothing is collected and there are
+ * no extras. The company owes the Saathi their usual share, shown before saving.
+ */
+function MembershipCompletion({ booking, commissionPercent, onSave, onCancel, by }: CompletionProps) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const collection = buildCollection({ planId: booking.planId, extraPaise: 0, extraNote: '', method: 'membership', commissionPercent })
+  const row = 'flex items-baseline justify-between gap-3'
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      await onSave(collection)
+    } catch {
+      setError('That did not save. Check your internet connection and try again.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form noValidate onSubmit={submit} className="grid gap-4 rounded-2xl bg-blush/70 p-4">
+      <p className="flex items-center gap-2 font-semibold">
+        <Crown aria-hidden className="size-5 text-rosewood" />
+        Membership visit: nothing to collect
+      </p>
+      <p className="text-sm text-ink-muted">
+        The customer’s monthly membership pays for this visit. Do not take money for it. If they want extra time, ask them to
+        book it separately.
+      </p>
+      <dl className="grid gap-1.5 rounded-xl bg-white p-4 text-sm">
+        <div className={`${row} text-ink-muted`}>
+          <dt>Visit value ({booking.planName})</dt>
+          <dd>{formatRupees(collection.totalPaise)}</dd>
+        </div>
+        <div className={`${row} font-semibold text-emerald-800`}>
+          <dt>{by === 'saathi' ? 'Saathi First pays you' : 'Saathi First pays the Saathi'}</dt>
+          <dd>{formatRupees(collection.saathiSharePaise)}</dd>
+        </div>
+      </dl>
+      {error && (
+        <p role="alert" className="text-sm font-medium text-[#b3261e]">
+          {error}
+        </p>
+      )}
+      <div className="grid grid-cols-[1fr_auto] gap-2">
+        <button
+          type="submit"
+          disabled={busy}
+          className="flex h-12 items-center justify-center gap-2 rounded-xl bg-burgundy font-semibold text-blush transition-colors hover:bg-wine disabled:opacity-60"
+        >
+          <Check aria-hidden className="size-5" />
+          {busy ? 'Saving…' : 'Complete visit'}
+        </button>
+        <button type="button" onClick={onCancel} className="h-12 rounded-xl px-4 font-semibold text-ink-muted hover:bg-wine/10">
+          Back
+        </button>
+      </div>
+    </form>
+  )
+}
+
+/** A paid visit: the plan amount is fixed, extras need a reason, and the split is shown first. */
+function PaidCompletion({ booking, commissionPercent, onSave, onCancel, by }: CompletionProps) {
   const id = useId()
   const [extra, setExtra] = useState('')
   const [note, setNote] = useState('')

@@ -70,8 +70,11 @@ export function Money({ percent, bookings, settlements, saathis, accounts }: {
   accounts: Accounts
 }) {
   const nameOf = (id: string) => saathis.find((saathi) => saathi.id === id)?.name ?? 'Former Saathi'
-  const collected = bookings.filter((row) => row.status === 'completed' && row.collection)
-  const total = (key: 'totalPaise' | 'companySharePaise') => collected.reduce((sum, row) => sum + (row.collection?.[key] ?? 0), 0)
+  const recorded = bookings.filter((row) => row.status === 'completed' && row.collection)
+  // Membership visits collect nothing from the customer; their negative share nets off below.
+  const collected = recorded.filter((row) => row.collection?.method !== 'membership')
+  const total = (key: 'totalPaise' | 'companySharePaise') =>
+    (key === 'totalPaise' ? collected : recorded).reduce((sum, row) => sum + (row.collection?.[key] ?? 0), 0)
   const received = settlements.reduce((sum, row) => sum + row.amountPaise, 0)
   const outstanding = [...accounts.values()].reduce((sum, account) => sum + account.duePaise, 0)
 
@@ -82,18 +85,20 @@ export function Money({ percent, bookings, settlements, saathis, accounts }: {
     .sort((a, b) => (b.completedAt?.toMillis() ?? 0) - (a.completedAt?.toMillis() ?? 0))
     .slice(0, 20)
 
+  const owedToSaathis = [...accounts.values()].reduce((sum, account) => sum + account.creditPaise, 0)
   const stats: [string, number][] = [
     ['Collected from customers', total('totalPaise')],
-    ['Company share', total('companySharePaise')],
-    ['Received from Saathis', received],
+    ['Company share (net)', total('companySharePaise')],
+    ['Received from Saathis (net)', received],
     ['Still to receive', outstanding],
+    ['Owed to Saathis', owedToSaathis],
   ]
 
   return (
     <div className="grid gap-6">
       <ShareSetting key={percent} percent={percent} />
 
-      <dl className="grid grid-cols-2 gap-3 nav:grid-cols-4">
+      <dl className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,11rem),1fr))] gap-3">
         {stats.map(([label, value]) => (
           <div key={label} className={panel}>
             <dt className="text-xs font-semibold text-ink-muted">{label}</dt>
@@ -148,7 +153,11 @@ export function Money({ percent, bookings, settlements, saathis, accounts }: {
                   <p className="truncate font-semibold">{nameOf(row.saathiId)}</p>
                   <p className="truncate text-xs text-ink-muted">
                     {row.createdAt ? friendlyWhen(row.createdAt.toDate()) : 'Just now'} ·{' '}
-                    {row.method === 'razorpay' ? `Razorpay ${row.razorpayPaymentId ?? ''}` : `Recorded: ${row.note ?? ''}`}
+                    {row.method === 'razorpay'
+                      ? `Razorpay ${row.razorpayPaymentId ?? ''}`
+                      : row.method === 'payout'
+                        ? `Paid to Saathi: ${row.note ?? ''}`
+                        : `Recorded: ${row.note ?? ''}`}
                   </p>
                 </div>
                 <p className="shrink-0 font-semibold">{formatRupees(row.amountPaise)}</p>

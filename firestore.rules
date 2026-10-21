@@ -90,6 +90,95 @@ service cloud.firestore {
       return {'property': 9900, 'quick': 24900, 'care': 49900, 'day': 99900, 'extended': 129900};
     }
 
+    // ---------- Memberships ----------
+
+    // Mirrors `memberships` (visitsPerMonth) and `servicePlans` in main/src/content/site.ts.
+    function membershipVisits() {
+      return {'basic-care': 4, 'silver-care': 8, 'premium-care': 16};
+    }
+    function membershipServices() {
+      return {
+        'basic-care': ['elder-companionship'],
+        'silver-care': ['hospital-assistance', 'banking-assistance'],
+        'premium-care': ['elder-companionship', 'hospital-assistance', 'transportation-assistance']
+      };
+    }
+
+    function membershipPath(uid) {
+      return /databases/$(database)/documents/memberships/$(uid);
+    }
+
+    // The month whose allowance a visit uses, "2026-10", from its start in UTC (visits run
+    // 7 am – 9 pm India time, the same day in UTC). Mirrors monthKey in main/src/lib/dates.ts.
+    function monthKey(moment) {
+      return string(moment.year()) + '-' + (moment.month() < 10 ? '0' : '') + string(moment.month());
+    }
+
+    // Admins set the plan and dates; the plan's visit count and name must be the catalogue's.
+    function validMembership(uid, data) {
+      return data.keys().hasAll(['uid', 'planId', 'planName', 'visitsPerMonth', 'status', 'validFrom',
+                                 'validUntil', 'used', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'planId', 'planName', 'visitsPerMonth', 'status', 'validFrom',
+                                'validUntil', 'used', 'lastBookingId', 'note', 'updatedAt'])
+        && data.uid == uid
+        && data.planId in membershipVisits()
+        && data.visitsPerMonth == membershipVisits()[data.planId]
+        && text(data.planName, 1, 60)
+        && data.status in ['active', 'cancelled']
+        && data.validFrom is timestamp && data.validUntil is timestamp && data.validUntil > data.validFrom
+        && data.used is map
+        && optionalText(data, 'note', 300)
+        && data.updatedAt == request.time;
+    }
+
+    // The customer's own browser may only move `used` by one, tied to booking `lastBookingId`:
+    // up when that booking is created as a membership visit in the same write...
+    function customerUsesVisit(uid) {
+      let data = request.resource.data;
+      let old = resource.data;
+      let path = /databases/$(database)/documents/bookings/$(data.get('lastBookingId', '-'));
+      let booking = getAfter(path).data;
+      let key = monthKey(booking.preferredStart);
+      return request.auth.uid == uid
+        && data.diff(old).affectedKeys().hasOnly(['used', 'lastBookingId'])
+        && data.used.diff(old.used).affectedKeys().hasOnly([key])
+        && !exists(path)
+        && booking.uid == uid
+        && booking.get('paidBy', '') == 'membership'
+        && old.status == 'active'
+        && booking.preferredStart >= old.validFrom
+        && booking.preferredStart <= old.validUntil
+        && booking.serviceId in membershipServices()[old.planId]
+        && data.used[key] == old.used.get(key, 0) + 1
+        && data.used[key] <= old.visitsPerMonth;
+    }
+
+    // ...and down when the customer cancels that membership visit in the same write.
+    function customerReturnsVisit(uid) {
+      let data = request.resource.data;
+      let old = resource.data;
+      let path = /databases/$(database)/documents/bookings/$(data.get('lastBookingId', '-'));
+      let before = get(path).data;
+      let key = monthKey(before.preferredStart);
+      return request.auth.uid == uid
+        && data.diff(old).affectedKeys().hasOnly(['used', 'lastBookingId'])
+        && data.used.diff(old.used).affectedKeys().hasOnly([key])
+        && before.uid == uid
+        && before.get('paidBy', '') == 'membership'
+        && before.status == 'new'
+        && getAfter(path).data.status == 'cancelled'
+        && data.used[key] == old.used.get(key, 0) - 1
+        && data.used[key] >= 0;
+    }
+
+    // A booking paid by membership is created only together with its +1 on the membership
+    // (customerUsesVisit checks the plan, dates, service and monthly limit).
+    function membershipPaysFor(bookingId) {
+      return request.resource.data.paidBy == 'membership'
+        && existsAfter(membershipPath(request.auth.uid))
+        && getAfter(membershipPath(request.auth.uid)).data.get('lastBookingId', '') == bookingId;
+    }
+
     // Property Monitoring is one visit with no hours; every other service is booked by the hour
     // on a companion plan that covers those hours. Name and price must be the catalogue's own,
     // so a booking can never carry a made-up price.
@@ -122,8 +211,10 @@ service cloud.firestore {
         && data.keys().hasOnly(['uid', 'name', 'phone', 'planId', 'planName', 'planPrice', 'hours',
                                 'preferredStart', 'location', 'address', 'message', 'status',
                                 'createdAt', 'serviceId', 'serviceName', 'saathiId', 'saathiName',
-                                'saathiChoice'])
+                                'saathiChoice', 'paidBy'])
         && data.uid == request.auth.uid
+        // A membership visit is always the 2-hour plan.
+        && (!('paidBy' in data) || (data.paidBy == 'membership' && data.planId == 'quick'))
         && data.status == 'new'
         && stampedNow(data)
         && text(data.name, 1, 100)
@@ -218,13 +309,29 @@ service cloud.firestore {
         && c.extraPaise is int && c.extraPaise >= 0 && c.extraPaise <= 5000000
         && (c.extraPaise == 0 ? !('extraNote' in c) : text(c.get('extraNote', ''), 3, 200))
         && c.totalPaise == c.billPaise + c.extraPaise
-        && c.method in ['upi', 'cash']
         && percent is int && percent >= 0 && percent <= 100
         && c.commissionPercent == percent
+        && (booking.get('paidBy', '') == 'membership' ? membershipSplit(c, percent) : paidSplit(c, percent));
+    }
+
+    // The customer paid the Saathi: the Saathi owes the company its share.
+    function paidSplit(c, percent) {
+      return c.method in ['upi', 'cash']
         && c.companySharePaise is int
         && c.companySharePaise * 100 <= c.totalPaise * percent + 50
         && c.companySharePaise * 100 > c.totalPaise * percent - 50
         && c.saathiSharePaise == c.totalPaise - c.companySharePaise;
+    }
+
+    // The membership paid: nothing was collected, no extras, and the company owes the Saathi
+    // their usual share, recorded as a negative company share. Mirrors buildCollection.
+    function membershipSplit(c, percent) {
+      return c.method == 'membership'
+        && c.extraPaise == 0
+        && c.saathiSharePaise is int
+        && (c.totalPaise - c.saathiSharePaise) * 100 <= c.totalPaise * percent + 50
+        && (c.totalPaise - c.saathiSharePaise) * 100 > c.totalPaise * percent - 50
+        && c.companySharePaise == -c.saathiSharePaise;
     }
 
     // A progress time may only be written as "now" by the server, never back- or forward-dated.
@@ -310,15 +417,18 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
-    // A payment an admin received outside Razorpay (cash at the office, bank transfer).
+    // A payment an admin received outside Razorpay (cash at the office, bank transfer), or a
+    // payout the company made to a Saathi for membership visits (stored as a negative amount,
+    // so every sum of payments nets it off).
     // Razorpay payments are written by the Saathi website's server, never by browsers.
     function validManualSettlement(data) {
       return data.keys().hasAll(['saathiId', 'amountPaise', 'method', 'note', 'recordedBy', 'createdAt'])
         && data.keys().hasOnly(['saathiId', 'amountPaise', 'method', 'note', 'recordedBy', 'createdAt'])
         && text(data.saathiId, 1, 128)
         && exists(/databases/$(database)/documents/applications/$(data.saathiId))
-        && data.amountPaise is int && data.amountPaise >= 100 && data.amountPaise <= 100000000
-        && data.method == 'manual'
+        && data.amountPaise is int
+        && ((data.method == 'manual' && data.amountPaise >= 100 && data.amountPaise <= 100000000)
+            || (data.method == 'payout' && data.amountPaise <= -100 && data.amountPaise >= -100000000))
         && text(data.note, 3, 200)
         && data.recordedBy == request.auth.uid
         && data.createdAt == request.time;
@@ -377,7 +487,8 @@ service cloud.firestore {
       // which holds at most MAX_ACTIVE_BOOKINGS entries (see below).
       allow create: if signedIn() && verifiedContact() && validBooking(request.resource.data)
         && existsAfter(customerPath(request.auth.uid))
-        && id in getAfter(customerPath(request.auth.uid)).data.active;
+        && id in getAfter(customerPath(request.auth.uid)).data.active
+        && (!('paidBy' in request.resource.data) || membershipPaysFor(id));
       // The customer, admins, and the Saathi assigned to the visit (who needs the address).
       allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid)
         || (isSaathi() && resource.data.assignedSaathiId == mySaathiId());
@@ -399,6 +510,18 @@ service cloud.firestore {
         && request.resource.data.active.size() <= 3
         && allInProgress(request.resource.data.active)
         && keepsInProgress(resource == null ? [] : resource.data.get('active', []), request.resource.data.active);
+      allow delete: if false;
+    }
+
+    // Monthly memberships, one per customer at memberships/{their uid}. Admins switch them on
+    // after the customer pays the office; the customer's browser can only spend or return one
+    // visit, in the same write that books or cancels a membership visit.
+    match /memberships/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create: if isAdmin() && validMembership(uid, request.resource.data);
+      allow update: if (isAdmin() && validMembership(uid, request.resource.data))
+        || (signedIn() && customerUsesVisit(uid))
+        || (signedIn() && customerReturnsVisit(uid));
       allow delete: if false;
     }
 

@@ -1,12 +1,15 @@
 import { GoogleAuthProvider, linkWithPopup, linkWithRedirect, updateProfile, verifyBeforeUpdateEmail } from 'firebase/auth'
-import { CalendarCheck, Check, LogOut, Mail, Pencil, Smartphone, UserRound, type LucideIcon } from 'lucide-react'
+import { CalendarCheck, Check, Copy, Crown, LogOut, Mail, Pencil, Smartphone, UserRound, type LucideIcon } from 'lucide-react'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { AuthGate } from '../auth/AuthGate'
 import { useAuth } from '../auth/context'
 import { sendVerification } from '../auth/verify'
 import { VerifyPhone } from '../auth/VerifyPhone'
+import { services } from '../content/site'
+import { useMembership } from '../hooks/useMembership'
 import { auth } from '../lib/firebase'
+import { monthName, servicesCoveredBy, visitsLeft } from '../lib/membership'
 
 const providerNames: Record<string, string> = {
   'google.com': 'Google',
@@ -376,6 +379,104 @@ function EmailRow() {
   )
 }
 
+/** The customer's account number, which the office needs to switch a membership on. */
+function CustomerId({ uid }: { uid: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <p className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-ink-muted">
+      Your customer ID: <code className="rounded-lg bg-white px-2 py-1 font-semibold text-ink [overflow-wrap:anywhere]">{uid}</code>
+      <button
+        type="button"
+        onClick={() => {
+          void navigator.clipboard?.writeText(uid).then(() => setCopied(true))
+        }}
+        className={smallAction}
+      >
+        <Copy aria-hidden className="size-4" />
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </p>
+  )
+}
+
+function MembershipCard({ uid }: { uid: string }) {
+  const membership = useMembership()
+  const [now] = useState(() => new Date())
+  if (membership === undefined) return null
+
+  if (!membership) {
+    return (
+      <section aria-label="Membership" className="rounded-3xl bg-white/70 p-6 ring-1 ring-gold/20 nav:p-8">
+        <p className="flex items-center gap-2 text-sm font-semibold text-ink-muted">
+          <Crown aria-hidden className="size-4 text-rosewood" />
+          Membership
+        </p>
+        <p className="mt-1 text-lg font-medium">No membership yet</p>
+        <p className="mt-2 text-sm text-ink-muted">
+          A monthly membership gives you free visits every month. Choose one on Our Plans and share your customer ID with us
+          when you pay, so we can switch it on.
+        </p>
+        <CustomerId uid={uid} />
+        <Link
+          to="/plans?tab=monthly"
+          className="mt-4 inline-flex min-h-12 items-center gap-2 rounded-2xl bg-burgundy px-5 font-semibold text-blush hover:bg-wine"
+        >
+          See monthly memberships
+        </Link>
+      </section>
+    )
+  }
+
+  const expired = membership.validUntil.toMillis() < now.getTime()
+  const active = membership.status === 'active' && !expired
+  const left = visitsLeft(membership, now)
+  const covered = servicesCoveredBy(membership.planId)
+    .map((id) => services.find((service) => service.id === id)?.name)
+    .filter(Boolean)
+  const until = membership.validUntil.toDate().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+
+  return (
+    <section
+      aria-label="Membership"
+      className="rounded-3xl bg-[linear-gradient(135deg,#6b1e2e,#8f2f42_60%,#b9545c)] p-6 text-blush shadow-card nav:p-8"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="flex items-center gap-2 text-sm font-semibold text-blush/80">
+          <Crown aria-hidden className="size-4 text-gold" />
+          Your membership
+        </p>
+        <span
+          className={`rounded-full px-3 py-1 text-xs font-semibold ${active ? 'bg-emerald-100 text-emerald-800' : 'bg-blush/20 text-blush'}`}
+        >
+          {active ? 'Active' : membership.status === 'cancelled' ? 'Cancelled' : 'Expired'}
+        </span>
+      </div>
+      <p className="mt-2 text-3xl font-light tracking-tight">{membership.planName}</p>
+      {active ? (
+        <>
+          <p className="mt-4 text-lg">
+            <strong className="text-2xl font-semibold text-gold">{left}</strong> of {membership.visitsPerMonth} free visits left in{' '}
+            {monthName(now)}
+          </p>
+          <p className="mt-1 text-sm text-blush/80">Up to 2 hours each. Unused visits end with the month. Valid until {until}.</p>
+          <p className="mt-3 text-sm text-blush/80">Covers: {covered.join(', ')}</p>
+          <Link
+            to="/contact?membership=1"
+            className="mt-5 inline-flex min-h-12 items-center gap-2 rounded-2xl bg-white px-5 font-semibold text-wine hover:bg-blush"
+          >
+            Book a visit
+          </Link>
+        </>
+      ) : (
+        <p className="mt-3 text-sm text-blush/85">
+          {membership.status === 'cancelled' ? 'This membership has been stopped.' : `This membership ended on ${until}.`} Contact us to
+          renew it.
+        </p>
+      )}
+    </section>
+  )
+}
+
 function ProfileDetails() {
   const { user, signOut } = useAuth()
   if (!user) return null
@@ -383,6 +484,7 @@ function ProfileDetails() {
 
   return (
     <div className="grid gap-6">
+      <MembershipCard uid={user.uid} />
       <section aria-label="Your details" className="divide-y divide-burgundy/10 rounded-3xl bg-white/90 p-6 shadow-[0_20px_50px_-30px_rgb(58_17_25/0.5)] ring-1 ring-gold/25 nav:p-8">
         <NameRow />
         <PhoneRow />

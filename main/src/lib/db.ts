@@ -3,8 +3,10 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  FieldPath,
   getDoc,
   getDocs,
+  increment,
   onSnapshot,
   orderBy,
   query,
@@ -15,6 +17,7 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore'
+import { monthKey } from './dates'
 import { db } from './firebase'
 import type { Collection } from './finance'
 import { planForHours, priceLabel } from './pricing'
@@ -66,6 +69,8 @@ export type Booking = {
   cancelledBy?: 'customer' | 'admin'
   /** What the Saathi collected when they completed the visit, and how it splits. */
   collection?: Collection
+  /** Set when the customer's monthly membership pays for the visit, so nothing is collected. */
+  paidBy?: 'membership'
 }
 
 export const applicationStatuses = ['pending', 'verified', 'rejected'] as const
@@ -137,6 +142,11 @@ export async function createBooking({ preferredStart, ...booking }: NewBooking) 
     createdAt: serverTimestamp(),
   })
   batch.set(doc(store, 'customers', booking.uid), { active: [...active, ref.id] })
+  // A membership visit spends one of this month's visits in the same write; firestore.rules
+  // accept the booking only if the count goes up by one and stays within the plan.
+  if (booking.paidBy === 'membership') {
+    batch.update(doc(store, 'memberships', booking.uid), new FieldPath('used', monthKey(preferredStart)), increment(1), 'lastBookingId', ref.id)
+  }
   await batch.commit()
   return ref
 }
@@ -235,13 +245,26 @@ export function markCompleted(bookingId: string, collection: Collection) {
   })
 }
 
-/** Customers may cancel only while no Saathi is assigned; admins at any point before completion. */
-export function cancelBooking(bookingId: string, by: 'customer' | 'admin') {
-  return updateDoc(doc(database(), 'bookings', bookingId), {
+/**
+ * Customers may cancel only while no Saathi is assigned; admins at any point before completion.
+ * A cancelled membership visit is given back to that month's allowance in the same write.
+ */
+export function cancelBooking(booking: Stored<Booking>, by: 'customer' | 'admin') {
+  const store = database()
+  const batch = writeBatch(store)
+  batch.update(doc(store, 'bookings', booking.id), {
     status: 'cancelled' satisfies BookingStatus,
     cancelledAt: serverTimestamp(),
     cancelledBy: by,
   })
+  if (booking.paidBy === 'membership' && booking.preferredStart) {
+    const used = new FieldPath('used', monthKey(booking.preferredStart.toDate()))
+    const membership = doc(store, 'memberships', booking.uid)
+    // Admins may edit a membership freely but must stamp it; a customer may only move the count.
+    if (by === 'admin') batch.update(membership, used, increment(-1), 'lastBookingId', booking.id, 'updatedAt', serverTimestamp())
+    else batch.update(membership, used, increment(-1), 'lastBookingId', booking.id)
+  }
+  return batch.commit()
 }
 
 /** Admin: accept the extra time. The booking moves to the plan that covers the new total. */

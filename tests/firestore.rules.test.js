@@ -13,8 +13,10 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  FieldPath,
   getDoc,
   getDocs,
+  increment,
   query,
   serverTimestamp,
   setDoc,
@@ -777,6 +779,161 @@ describe('company share settings and payments', () => {
     await assertFails(addDoc(collection(db('admin1', VERIFIED), 'settlements'), { ...manual, recordedBy: 'someone' }))
     await assertFails(updateDoc(doc(db('admin1', VERIFIED), 'settlements/pay_1'), { amountPaise: 1 }))
     await assertFails(deleteDoc(doc(db('admin1', VERIFIED), 'settlements/pay_1')))
+  })
+})
+
+describe('memberships', () => {
+  // The month key the rules compute from a visit's start (UTC), e.g. "2026-10".
+  const keyOf = (timestamp) => {
+    const date = timestamp.toDate()
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+  }
+  const visitAt = istSlot(3)
+  const key = keyOf(visitAt)
+  const membership = (overrides = {}) => ({
+    uid: 'alice',
+    planId: 'silver-care',
+    planName: 'Silver Care',
+    visitsPerMonth: 8,
+    status: 'active',
+    validFrom: inDays(-1),
+    validUntil: inDays(40),
+    used: {},
+    note: 'Paid by UPI',
+    updatedAt: serverTimestamp(),
+    ...overrides,
+  })
+  const memberVisit = (overrides = {}) =>
+    booking('alice', {
+      planId: 'quick',
+      planName: 'Quick Companion',
+      planPrice: '₹249 / up to 2 hrs',
+      hours: 2,
+      preferredStart: visitAt,
+      paidBy: 'membership',
+      ...overrides,
+    })
+
+  /** Books a membership visit the way the website does: booking, active list and +1 together. */
+  async function bookMember(store, data = memberVisit(), uid = 'alice', change = 1) {
+    const mine = await getDocs(query(collection(store, 'bookings'), where('uid', '==', uid)))
+    const active = mine.docs.filter((row) => ['new', 'assigned', 'started'].includes(row.data().status)).map((row) => row.id)
+    const ref = doc(collection(store, 'bookings'))
+    const batch = writeBatch(store)
+    batch.set(ref, data)
+    batch.set(doc(store, 'customers', uid), { active: [...active, ref.id] })
+    batch.update(doc(store, 'memberships', uid), new FieldPath('used', keyOf(data.preferredStart)), increment(change), 'lastBookingId', ref.id)
+    await batch.commit()
+    return ref
+  }
+
+  const seedMembership = (overrides = {}) => seed('memberships/alice', { ...membership(overrides), updatedAt: Timestamp.now() })
+
+  test('only admins switch a membership on, with the catalogue’s plan and visit count', async () => {
+    await assertFails(setDoc(doc(db('alice', VERIFIED), 'memberships/alice'), membership()))
+    await assertFails(setDoc(doc(db('admin1', VERIFIED), 'memberships/alice'), membership({ visitsPerMonth: 99 })))
+    await assertFails(setDoc(doc(db('admin1', VERIFIED), 'memberships/alice'), membership({ planId: 'gold-care' })))
+    await assertFails(setDoc(doc(db('admin1', VERIFIED), 'memberships/alice'), membership({ uid: 'bob' })))
+    await assertSucceeds(setDoc(doc(db('admin1', VERIFIED), 'memberships/alice'), membership()))
+  })
+  test('customers read their own membership only', async () => {
+    await seedMembership()
+    await assertSucceeds(getDoc(doc(db('alice', VERIFIED), 'memberships/alice')))
+    await assertFails(getDoc(doc(db('bob', VERIFIED), 'memberships/alice')))
+    await assertFails(getDocs(collection(db('alice', VERIFIED), 'memberships')))
+  })
+  test('a member books a free visit, which uses one of the month’s visits', async () => {
+    await seedMembership()
+    await assertSucceeds(bookMember(db('alice', VERIFIED)))
+    const after = await env.withSecurityRulesDisabled(async (ctx) => (await getDoc(doc(ctx.firestore(), 'memberships/alice'))).data())
+    if (after.used[key] !== 1) throw new Error(`expected 1 visit used, got ${after.used[key]}`)
+  })
+  test('a free visit cannot be booked without using a visit, or by someone without a membership', async () => {
+    await seedMembership()
+    await assertFails(book(db('alice', VERIFIED), memberVisit()))
+    await assertFails(bookMember(db('alice', VERIFIED), memberVisit(), 'alice', 2))
+    await assertFails(bookMember(db('bob', VERIFIED), memberVisit({ uid: 'bob' }), 'bob'))
+  })
+  test('the monthly limit, dates, service and plan are enforced', async () => {
+    await seedMembership({ used: { [key]: 8 } })
+    await assertFails(bookMember(db('alice', VERIFIED)))
+    await seedMembership({ validUntil: inDays(2) })
+    await assertFails(bookMember(db('alice', VERIFIED)))
+    await seedMembership({ status: 'cancelled' })
+    await assertFails(bookMember(db('alice', VERIFIED)))
+    await seedMembership()
+    await assertFails(bookMember(db('alice', VERIFIED), memberVisit({ serviceId: 'elder-companionship', serviceName: 'Elder Companionship' })))
+    await assertFails(
+      bookMember(db('alice', VERIFIED), memberVisit({ planId: 'care', planName: 'Care Companion', planPrice: '₹499 / up to 4 hrs', hours: 4 })),
+    )
+  })
+  test('customers cannot change their membership except through a booking', async () => {
+    await seedMembership()
+    await assertFails(updateDoc(doc(db('alice', VERIFIED), 'memberships/alice'), { used: {} }))
+    await assertFails(updateDoc(doc(db('alice', VERIFIED), 'memberships/alice'), { validUntil: inDays(400) }))
+    await assertFails(updateDoc(doc(db('alice', VERIFIED), 'memberships/alice'), { visitsPerMonth: 16 }))
+  })
+  test('cancelling a free visit gives it back, once', async () => {
+    await seedMembership()
+    const ref = await bookMember(db('alice', VERIFIED))
+    const store = db('alice', VERIFIED)
+    const cancel = () => {
+      const batch = writeBatch(store)
+      batch.update(doc(store, 'bookings', ref.id), { status: 'cancelled', cancelledAt: serverTimestamp(), cancelledBy: 'customer' })
+      batch.update(doc(store, 'memberships/alice'), new FieldPath('used', key), increment(-1), 'lastBookingId', ref.id)
+      return batch.commit()
+    }
+    await assertSucceeds(cancel())
+    await assertFails(cancel())
+  })
+  test('a Saathi completes a membership visit with nothing collected; the company owes their share', async () => {
+    await seed('applications/s1', { ...application('ravi', { status: 'verified' }), createdAt: Timestamp.now() })
+    await seed('staff/ravi', { applicationId: 's1', name: 'Ravi Kumar', phone: '9123456780', active: true, createdAt: Timestamp.now() })
+    await seed('bookings/m1', {
+      ...memberVisit(),
+      createdAt: Timestamp.now(),
+      assignedSaathiId: 's1',
+      assignedSaathiName: 'Ravi K.',
+      assignedSaathiPhone: '9123456780',
+      scheduledAt: visitAt,
+      assignedAt: Timestamp.now(),
+      status: 'assigned',
+    })
+    const membershipCollection = { billPaise: 24900, extraPaise: 0, totalPaise: 24900, method: 'membership', commissionPercent: 20, companySharePaise: -19920, saathiSharePaise: 19920 }
+    const complete = (collectionData) => updateDoc(doc(db('ravi', PHONE), 'bookings/m1'), { status: 'completed', completedAt: serverTimestamp(), collection: collectionData })
+    await assertFails(complete({ ...membershipCollection, method: 'cash', companySharePaise: 4980 }))
+    await assertFails(complete({ ...membershipCollection, companySharePaise: 4980 }))
+    await assertFails(complete({ ...membershipCollection, extraPaise: 5000, extraNote: 'Extra hour', totalPaise: 29900 }))
+    await assertSucceeds(complete(membershipCollection))
+  })
+  test('a paid visit cannot be recorded as a membership visit', async () => {
+    await seed('applications/s1', { ...application('ravi', { status: 'verified' }), createdAt: Timestamp.now() })
+    await seed('staff/ravi', { applicationId: 's1', name: 'Ravi Kumar', phone: '9123456780', active: true, createdAt: Timestamp.now() })
+    await seed('bookings/p1', {
+      ...booking('alice', { planId: 'quick', planName: 'Quick Companion', planPrice: '₹249 / up to 2 hrs', hours: 2 }),
+      createdAt: Timestamp.now(),
+      assignedSaathiId: 's1',
+      assignedSaathiName: 'Ravi K.',
+      assignedSaathiPhone: '9123456780',
+      scheduledAt: visitAt,
+      assignedAt: Timestamp.now(),
+      status: 'assigned',
+    })
+    await assertFails(
+      updateDoc(doc(db('ravi', PHONE), 'bookings/p1'), {
+        status: 'completed',
+        completedAt: serverTimestamp(),
+        collection: { billPaise: 24900, extraPaise: 0, totalPaise: 24900, method: 'membership', commissionPercent: 20, companySharePaise: -19920, saathiSharePaise: 19920 },
+      }),
+    )
+  })
+  test('admins record payouts to Saathis as negative amounts only', async () => {
+    await seed('applications/s1', { ...application('ravi', { status: 'verified' }), createdAt: Timestamp.now() })
+    const payout = { saathiId: 's1', amountPaise: -19920, method: 'payout', note: 'UPI to Saathi', recordedBy: 'admin1', createdAt: serverTimestamp() }
+    await assertSucceeds(addDoc(collection(db('admin1', VERIFIED), 'settlements'), payout))
+    await assertFails(addDoc(collection(db('admin1', VERIFIED), 'settlements'), { ...payout, amountPaise: 19920 }))
+    await assertFails(addDoc(collection(db('admin1', VERIFIED), 'settlements'), { ...payout, method: 'manual' }))
+    await assertFails(addDoc(collection(db('ravi', PHONE), 'settlements'), payout))
   })
 })
 

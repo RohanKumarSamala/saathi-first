@@ -23,11 +23,15 @@ import { DEFAULT_COMMISSION_PERCENT } from './finance'
 /** staff/{login uid}: lets that login use the Saathi website as the Saathi of `applicationId`. */
 export type Staff = { applicationId: string; name: string; phone: string; active: boolean; createdAt: Timestamp | null }
 
-/** A payment of the company's share. `razorpay` ones are written by the server only. */
+/**
+ * A payment of the company's share. `razorpay` ones are written by the server only.
+ * `payout` is the other way round: the company paid the Saathi for membership visits. It is
+ * stored as a negative amount so every sum of payments nets it off.
+ */
 export type Settlement = {
   saathiId: string
   amountPaise: number
-  method: 'razorpay' | 'manual'
+  method: 'razorpay' | 'manual' | 'payout'
   razorpayPaymentId?: string
   razorpayOrderId?: string
   note?: string
@@ -146,6 +150,18 @@ export async function removeAllAccess(applicationId: string) {
 
 export function setCommissionPercent(percent: number) {
   return setDoc(doc(database(), 'config', 'finance'), { commissionPercent: percent, updatedAt: serverTimestamp() })
+}
+
+/** Admin: money the company paid a Saathi, e.g. their share of membership visits by UPI. */
+export function recordPayout(input: { saathiId: string; amountPaise: number; note: string; adminUid: string }) {
+  return addDoc(collection(database(), 'settlements'), {
+    saathiId: input.saathiId,
+    amountPaise: -Math.abs(input.amountPaise),
+    method: 'payout',
+    note: input.note.trim(),
+    recordedBy: input.adminUid,
+    createdAt: serverTimestamp(),
+  })
 }
 
 /** Admin: a payment received outside Razorpay, e.g. cash handed in at the office. */

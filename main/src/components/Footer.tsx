@@ -26,15 +26,17 @@ export function Footer({ showEnquiry = true }: { showEnquiry?: boolean }) {
             <p className="text-large mt-2">
               Complete the form below and a member of our team will contact you.
             </p>
-            <div className="mt-16 grid gap-x-16 gap-y-12 nav:grid-cols-[35rem_1fr]">
+            {/* Side by side only when there is room for the form and the contact details; on
+                half-screen windows the long email address would otherwise push the page wide. */}
+            <div className="mt-16 grid gap-x-16 gap-y-12 xl:grid-cols-[minmax(0,35rem)_minmax(0,1fr)]">
               <EnquiryForm />
-              <ul className="flex flex-col gap-7 nav:pl-8">
+              <ul className="flex min-w-0 flex-col gap-7 xl:pl-8">
                 {contactItems.map(({ icon: Icon, label, value, href }) => (
                   <li key={label} className="flex items-start gap-4">
                     <span className="grid size-12 shrink-0 place-items-center rounded-full bg-blush/10 text-gold">
                       <Icon aria-hidden className="size-5" />
                     </span>
-                    <span>
+                    <span className="min-w-0 [overflow-wrap:anywhere]">
                       <span className="text-eyebrow block text-blush/70">{label}</span>
                       {href ? (
                         <a href={href} className="text-xlarge font-light transition-colors hover:text-gold">

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useId, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { useAuth } from '../auth/context'
 import { ButtonLink } from '../components/Button'
 import { Img } from '../components/Img'
 import { PageHero } from '../components/PageHero'
@@ -40,7 +41,11 @@ const tabs: { id: TabId; label: string; icon: LucideIcon }[] = [
 const isTab = (value: string | null): value is TabId => tabs.some((tab) => tab.id === value)
 
 function MembershipCard({ plan, index }: { plan: Membership; index: number }) {
-  const message = `Hello Saathi First, I would like to join the ${plan.name} membership (${plan.price} / month).`
+  const { user } = useAuth()
+  // The office switches the membership on against this ID once the customer has paid.
+  const message = `Hello Saathi First, I would like to join the ${plan.name} membership (${plan.price} / month).${
+    user ? ` My customer ID is ${user.uid}.` : ''
+  }`
   return (
     <li className="flex flex-col overflow-hidden rounded-card bg-white/90 shadow-card ring-1 ring-gold/25 transition-transform duration-500 ease-out-soft hover:-translate-y-1.5">
       <Img

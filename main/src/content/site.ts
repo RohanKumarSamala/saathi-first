@@ -251,6 +251,8 @@ export type Membership = {
   price: string
   description: string
   visits: string
+  /** Free visits each calendar month; unused ones expire. Mirrors membershipVisits() in firestore.rules. */
+  visitsPerMonth: number
   hoursEach: string
   includes: string[]
   /** One line listing what the plan does not cover. */
@@ -262,7 +264,7 @@ export type Membership = {
 
 /**
  * Monthly memberships, taken from the plans artwork supplied on 18 Oct 2026.
- * Booked by WhatsApp for now: firestore.rules only accepts the per-visit plans above.
+ * Bought through the office (WhatsApp / UPI); an admin then switches it on (main/src/lib/membership.ts).
  */
 export const memberships: Membership[] = [
   {
@@ -271,6 +273,7 @@ export const memberships: Membership[] = [
     price: '₹1,499',
     description: 'For occasional companionship and everyday assistance.',
     visits: '4 visits per month',
+    visitsPerMonth: 4,
     hoursEach: 'Up to 2 hours each',
     includes: [
       'Elder companionship',
@@ -289,6 +292,7 @@ export const memberships: Membership[] = [
     price: '₹2,999',
     description: 'For regular support for elderly loved ones.',
     visits: '8 visits per month',
+    visitsPerMonth: 8,
     hoursEach: 'Up to 2 hours each',
     includes: [
       'Hospital appointment support',
@@ -307,6 +311,7 @@ export const memberships: Membership[] = [
     price: '₹5,999',
     description: 'For families who need more frequent personal assistance.',
     visits: '16 visits per month',
+    visitsPerMonth: 16,
     hoursEach: 'Up to 2 hours each',
     includes: [
       'Companionship and daily errands',

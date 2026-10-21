@@ -57,7 +57,10 @@ export function Payments({ account, settlements, visits }: {
           {account.duePaise === 0 ? (
             <>
               <CheckCircle2 aria-hidden className="size-4" /> All settled
-              {account.creditPaise > 0 && ` · ${formatRupees(account.creditPaise)} paid ahead`}
+              {account.creditPaise > 0 &&
+                (account.membershipCreditPaise > 0
+                  ? ` · Saathi First owes you ${formatRupees(account.creditPaise)} (membership visits)`
+                  : ` · ${formatRupees(account.creditPaise)} paid ahead`)}
             </>
           ) : (
             <>
@@ -148,7 +151,10 @@ export function Payments({ account, settlements, visits }: {
                   {row.method === 'razorpay' ? <Smartphone aria-hidden className="size-5" /> : <Landmark aria-hidden className="size-5" />}
                 </span>
                 <div className="min-w-0 grow">
-                  <p className="font-semibold">{formatRupees(row.amountPaise)}</p>
+                  {/* A payout is stored as a negative amount: money Saathi First paid this Saathi. */}
+                  <p className="font-semibold">
+                    {row.method === 'payout' ? `${formatRupees(-row.amountPaise)} paid to you` : formatRupees(row.amountPaise)}
+                  </p>
                   <p className="truncate text-xs text-ink-muted">
                     {row.createdAt ? friendlyWhen(row.createdAt.toDate()) : 'Just now'} ·{' '}
                     {row.method === 'razorpay' ? `Razorpay ${row.razorpayPaymentId ?? ''}` : row.note || 'Recorded by the office'}

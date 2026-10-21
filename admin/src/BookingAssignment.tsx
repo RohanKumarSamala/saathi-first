@@ -1,4 +1,4 @@
-import { Check, Hourglass, MapPin, MessageCircle, Phone, UserRoundCheck, X, XCircle } from 'lucide-react'
+import { Check, Crown, Hourglass, MapPin, MessageCircle, Phone, UserRoundCheck, X, XCircle } from 'lucide-react'
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { Collapsible } from './Collapsible'
 import { services } from '../../main/src/content/site'
@@ -93,7 +93,7 @@ export function BookingAssignment({ row, saathis, linked, children }: {
 
   const onCancel = () => {
     if (window.confirm(`Cancel ${row.name}'s ${row.serviceName ?? 'booking'}? The customer will see it as cancelled.`)) {
-      void run(() => cancelBooking(row.id, 'admin'))
+      void run(() => cancelBooking(row, 'admin'))
     }
   }
 
@@ -101,6 +101,18 @@ export function BookingAssignment({ row, saathis, linked, children }: {
   const customerMessage = row.scheduledAt
     ? `Hello ${row.name}, this is Saathi First about your ${service} on ${friendlyWhen(row.scheduledAt.toDate())}.`
     : `Hello ${row.name}, this is Saathi First about your ${service} request.`
+  const membershipVisit = row.paidBy === 'membership'
+  // The visit's details for the assigned Saathi, with the money rule spelt out for membership visits.
+  const saathiMessage = [
+    `Hello ${row.assignedSaathiName?.split(' ')[0] ?? ''}, this is Saathi First.`,
+    `Your visit: ${service} for ${row.name} (${row.phone})${row.scheduledAt ? ` on ${friendlyWhen(row.scheduledAt.toDate())}` : ''}.`,
+    row.address ? `Address: ${row.address}.` : '',
+    membershipVisit
+      ? 'This is a MEMBERSHIP visit: please DO NOT collect any money from the customer. Saathi First will pay your share.'
+      : `Please collect ${row.planPrice.split(' / ')[0]} (${row.planName}) and record it on the Saathi website.`,
+  ]
+    .filter(Boolean)
+    .join('\n')
   const open = row.status === 'new' || row.status === 'assigned'
   const active = open || row.status === 'started'
 
@@ -110,6 +122,14 @@ export function BookingAssignment({ row, saathis, linked, children }: {
 
   return (
     <>
+      {membershipVisit && (
+        <p role="note" className="flex items-start gap-2 rounded-xl bg-gold/25 px-3 py-2 text-sm font-semibold text-wine ring-1 ring-gold/50">
+          <Crown aria-hidden className="mt-0.5 size-4 shrink-0 text-burgundy" />
+          <span>
+            Membership visit: free for the customer. The Saathi must not collect any money; Saathi First pays their share.
+          </span>
+        </p>
+      )}
       {unreachable && (
         <p role="status" className="rounded-xl bg-rosewood/15 px-3 py-2 text-sm font-medium text-wine">
           {row.assignedSaathiName} cannot see this visit: no active Saathi website login. Give access under Saathis, or change
@@ -131,7 +151,13 @@ export function BookingAssignment({ row, saathis, linked, children }: {
         {row.extraHoursRequested && (row.status === 'assigned' || row.status === 'started') && (
           <ExtraTimeRequest row={row} busy={busy} run={run} />
         )}
-        {row.collection && (
+        {row.collection?.method === 'membership' && (
+          <p className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+            <strong className="font-semibold">Nothing collected (membership)</strong> · Saathi First owes the Saathi{' '}
+            {formatRupees(row.collection.saathiSharePaise)}
+          </p>
+        )}
+        {row.collection && row.collection.method !== 'membership' && (
           <p className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
             <span className="sr-only">Collected: </span>
             <strong className="font-semibold">{formatRupees(row.collection.totalPaise)}</strong> by{' '}
@@ -160,7 +186,7 @@ export function BookingAssignment({ row, saathis, linked, children }: {
               <option key={s.id} value={s.id} disabled={!linked.has(s.id)}>
                 {s.name} · {s.area}
                 {(s.services ?? []).includes(row.serviceId ?? '') ? ' ✓' : ''}
-                {s.id === row.saathiId ? ' (asked for)' : ''}
+                {s.id === row.saathiId ? (row.saathiChoice === 'chosen' ? ' (customer asked for)' : ' (suggested)') : ''}
                 {linked.has(s.id) ? '' : ' (no Saathi login: give access first)'}
               </option>
             ))}
@@ -195,7 +221,8 @@ export function BookingAssignment({ row, saathis, linked, children }: {
         </form>
       )}
 
-      <div className="mt-auto flex items-center gap-2 border-t border-burgundy/10 pt-3">
+      {/* Wraps onto a second line in narrow cards (half-screen windows, zoomed-in browsers). */}
+      <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-burgundy/10 pt-3">
         <a href={callLink(row.phone)} title={`Call ${row.phone}`} aria-label={`Call ${row.name}`} className={iconAction}>
           <Phone aria-hidden className="size-4" />
         </a>
@@ -209,6 +236,19 @@ export function BookingAssignment({ row, saathis, linked, children }: {
         >
           <MessageCircle aria-hidden className="size-4" />
         </a>
+        {row.assignedSaathiPhone && active && (
+          <a
+            href={whatsappLink(row.assignedSaathiPhone, saathiMessage)}
+            target="_blank"
+            rel="noreferrer"
+            title={membershipVisit ? 'WhatsApp the Saathi (tells them not to collect money)' : 'WhatsApp the Saathi the visit details'}
+            aria-label={`WhatsApp ${row.assignedSaathiName ?? 'the Saathi'}`}
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-[#1f7a46]/10 px-3 text-xs font-semibold text-[#1f7a46] transition-colors hover:bg-[#1f7a46] hover:text-white"
+          >
+            <MessageCircle aria-hidden className="size-4" />
+            Saathi
+          </a>
+        )}
         {row.location && (
           <a
             href={`https://www.google.com/maps?q=${row.location.lat},${row.location.lng}`}

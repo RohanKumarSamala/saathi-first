@@ -83,7 +83,7 @@ function CurrentBooking({ row }: { row: Stored<Booking> }) {
     setBusy(true)
     setError('')
     try {
-      await cancelBooking(row.id, 'customer')
+      await cancelBooking(row, 'customer')
     } catch {
       setError(`Could not cancel. Please call ${site.phoneDisplay}.`)
       setBusy(false)
@@ -104,7 +104,9 @@ function CurrentBooking({ row }: { row: Stored<Booking> }) {
           {row.status === 'started' ? `Started ${when(row.startedAt)}` : visit}
         </Line>
         <Line icon={Clock} label="How long and price">
-          {[row.hours ? hoursLabel(row.hours) : '', row.planPrice.split(' / ')[0]].filter(Boolean).join(' · ')}
+          {[row.hours ? hoursLabel(row.hours) : '', row.paidBy === 'membership' ? 'Free with membership' : row.planPrice.split(' / ')[0]]
+            .filter(Boolean)
+            .join(' · ')}
         </Line>
         <Line icon={MapPin} label="Where">
           {row.address || (row.location ? 'Your shared location' : '')}
@@ -203,11 +205,15 @@ function PastBooking({ row }: { row: Stored<Booking> }) {
           {row.assignedSaathiName && ` · ${row.assignedSaathiName}`}
         </p>
         {/* What the Saathi recorded as paid, so the family can spot a mistake and call us. */}
-        {row.collection && (
-          <p className="truncate text-sm font-medium">
-            You paid {formatRupees(row.collection.totalPaise)}
-            {row.collection.extraPaise > 0 && ` (incl. ${formatRupees(row.collection.extraPaise)} extra: ${row.collection.extraNote})`}
-          </p>
+        {row.collection && row.collection.method === 'membership' ? (
+          <p className="truncate text-sm font-medium">Free with your membership</p>
+        ) : (
+          row.collection && (
+            <p className="truncate text-sm font-medium">
+              You paid {formatRupees(row.collection.totalPaise)}
+              {row.collection.extraPaise > 0 && ` (incl. ${formatRupees(row.collection.extraPaise)} extra: ${row.collection.extraNote})`}
+            </p>
+          )
         )}
       </div>
       <Link

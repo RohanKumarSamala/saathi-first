@@ -4,6 +4,7 @@ import {
   Baby,
   Car,
   ChevronRight,
+  Crown,
   HeartHandshake,
   Hospital,
   House,
@@ -12,10 +13,13 @@ import {
   Phone,
   type LucideIcon,
 } from 'lucide-react'
-import { Link, useLocation, useParams } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import logoIcon from '../assets/logo/icon-dark.svg'
 import { services, site, type Service } from '../content/site'
+import { useMembershipState } from '../hooks/useMembership'
 import { useSaathis } from '../hooks/useSaathis'
+import { monthName, servicesCoveredBy, visitsLeft } from '../lib/membership'
 import { companionPlans, isPerVisitService, priceLabel, propertyPlan } from '../lib/pricing'
 import { BookingWizard } from './booking/BookingWizard'
 import NotFound from './NotFound'
@@ -84,8 +88,8 @@ function Booking({ service }: { service: Service }) {
           </div>
           <div className="mb-8 flex items-center gap-4">
             <ServiceIcon service={service} large />
-            <div>
-              <h1 className="text-3xl font-light tracking-tight nav:text-4xl">{service.name}</h1>
+            <div className="min-w-0">
+              <h1 className="text-3xl font-light tracking-tight [overflow-wrap:anywhere] nav:text-4xl">{service.name}</h1>
               <p className="text-ink-muted">{fromPrice(service)}</p>
             </div>
           </div>
@@ -104,29 +108,72 @@ export default function Contact() {
 
   if (serviceId && !service) return <NotFound />
   if (service) return <Booking key={service.id} service={service} />
+  return <ServiceList search={search} />
+}
+
+/**
+ * Every service to book, or (from My profile's "Book a visit", ?membership=1) only the
+ * services the customer's membership covers, each marked free.
+ */
+function ServiceList({ search }: { search: string }) {
+  const [params] = useSearchParams()
+  const { membership } = useMembershipState()
+  const [now] = useState(() => new Date())
+  const memberView = params.get('membership') === '1'
+  const active = membership && membership.status === 'active' && membership.validUntil.toMillis() > now.getTime() ? membership : null
+  const covered = active ? servicesCoveredBy(active.planId) : []
+  const shown = memberView && active ? services.filter((item) => covered.includes(item.id)) : services
+  // Links into a service keep other parameters (such as a chosen plan), but not the list filter.
+  const forward = new URLSearchParams(search)
+  forward.delete('membership')
+  const query = forward.toString() ? `?${forward}` : ''
 
   return (
     <div className="page-padding">
       <div className="container-large pb-20 pt-28 nav:pt-36">
         <div className="mx-auto max-w-4xl">
-          <h1 className="text-4xl font-light tracking-tight nav:text-5xl">
-            Book a <span className="accent text-rosewood">Saathi</span>
-          </h1>
-          <p className="mt-3 text-lg text-ink-muted">Choose what you need help with. It takes about a minute.</p>
+          {memberView && active ? (
+            <>
+              <h1 className="text-4xl font-light tracking-tight nav:text-5xl">
+                Book a <span className="accent text-rosewood">visit</span>
+              </h1>
+              <p className="mt-3 flex flex-wrap items-center gap-2 text-lg text-ink-muted">
+                <Crown aria-hidden className="size-5 text-rosewood" />
+                Your {active.planName} membership covers these services · {visitsLeft(active, now)} of {active.visitsPerMonth} free visits
+                left in {monthName(now)}.
+              </p>
+            </>
+          ) : (
+            <>
+              <h1 className="text-4xl font-light tracking-tight nav:text-5xl">
+                Book a <span className="accent text-rosewood">Saathi</span>
+              </h1>
+              <p className="mt-3 text-lg text-ink-muted">Choose what you need help with. It takes about a minute.</p>
+              {memberView && membership === null && (
+                <p role="status" className="mt-3 rounded-2xl bg-gold/20 px-4 py-3 font-medium">
+                  You do not have an active membership, so all services are shown.
+                </p>
+              )}
+            </>
+          )}
 
           <ul className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {services.map((item) => (
+            {shown.map((item) => (
               <li key={item.id}>
                 <Link
-                  to={`/contact/${item.id}${search}`}
+                  to={`/contact/${item.id}${query}`}
                   className="group flex h-full items-center gap-4 rounded-2xl bg-white/90 p-4 ring-1 ring-gold/25 transition-[box-shadow,transform] duration-300 ease-out-soft hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-24px_rgb(58_17_25/0.55)] hover:ring-burgundy/30"
                 >
                   <ServiceIcon service={item} />
+                  {/* The price sits under the name, not beside it: in two narrow columns a long name
+                      such as "Transportation Assistance" would otherwise run into it. */}
                   <span className="min-w-0 grow">
-                    <span className="block text-lg font-semibold leading-snug">{item.name}</span>
+                    <span className="block text-lg font-semibold leading-snug [overflow-wrap:anywhere]">{item.name}</span>
                     <span className="line-clamp-2 text-sm text-ink-muted">{item.summary}</span>
+                    <span className="mt-1 block text-sm font-semibold text-burgundy">
+                      {memberView && active ? 'Free' : fromPrice(item)}
+                    </span>
                   </span>
-                  <span className="hidden shrink-0 text-sm font-semibold text-burgundy sm:block">{fromPrice(item)}</span>
                   <ChevronRight aria-hidden className="size-5 shrink-0 text-burgundy/50 transition-transform group-hover:translate-x-0.5" />
                 </Link>
               </li>

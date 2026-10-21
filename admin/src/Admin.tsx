@@ -49,13 +49,15 @@ import {
   type Settlement,
   type Staff,
 } from '../../main/src/lib/staff'
+import { watchAllMemberships, type Membership } from '../../main/src/lib/membership'
 import { accountsBySaathi } from './accounts'
+import { Memberships } from './Memberships'
 import { BookingAssignment } from './BookingAssignment'
 import { Money } from './Money'
 import { Team } from './Team'
 import { Collapsible } from './Collapsible'
 
-type Tab = 'bookings' | 'applications' | 'team' | 'money'
+type Tab = 'bookings' | 'applications' | 'memberships' | 'team' | 'money'
 type Feed<T> = { rows: Stored<T>[] | null; error: string }
 
 const formatDate = (row: Stored<unknown>) =>
@@ -166,15 +168,16 @@ function Card({ name, date, status, children }: {
 }) {
   return (
     <li className="flex min-w-0 flex-col gap-3 rounded-2xl bg-white/90 p-4 shadow-[0_10px_30px_-20px_rgb(58_17_25/0.45)] ring-1 ring-gold/25">
-      <div className="flex items-center gap-3">
+      {/* The status tags drop below the name when the card is narrow, rather than squeezing it. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-burgundy text-sm font-semibold text-blush">
           {initials(name) || '?'}
         </span>
-        <div className="min-w-0 grow">
+        <div className="min-w-[8rem] grow basis-0">
           <h3 className="truncate font-semibold leading-tight">{name}</h3>
           <p className="text-xs text-ink-muted">{date}</p>
         </div>
-        {status}
+        <div className="ml-auto">{status}</div>
       </div>
       {children}
     </li>
@@ -199,18 +202,27 @@ function BookingCard({ row, saathis, linked }: {
   linked: Set<string>
 }) {
   const asked = row.saathiName
-    ? `Asked for ${row.saathiName}${row.saathiChoice === 'random' ? ' (random)' : ''}`
+    ? row.saathiChoice === 'random'
+      ? `Suggested at random: ${row.saathiName}`
+      : `Customer asked for ${row.saathiName}`
     : ''
   return (
     <Card
       name={row.name}
       date={formatDate(row)}
       status={
-        <span
-          title={row.status === 'cancelled' && row.cancelledBy === 'customer' ? 'Cancelled by the customer' : undefined}
-          className={`${pillClass} ${statusTone[row.status] ?? ''}`}
-        >
-          {bookingStatusLabel[row.status] ?? row.status}
+        <span className="flex flex-wrap items-center justify-end gap-1.5">
+          {row.paidBy === 'membership' && (
+            <span title="Paid by the customer's membership: nothing to collect" className={`${pillClass} bg-gold/30 text-wine`}>
+              Membership
+            </span>
+          )}
+          <span
+            title={row.status === 'cancelled' && row.cancelledBy === 'customer' ? 'Cancelled by the customer' : undefined}
+            className={`${pillClass} ${statusTone[row.status] ?? ''}`}
+          >
+            {bookingStatusLabel[row.status] ?? row.status}
+          </span>
         </span>
       }
     >
@@ -221,7 +233,11 @@ function BookingCard({ row, saathis, linked }: {
         linked={linked}
       >
         <Line icon={ClipboardList} label="Service">
-          {[row.serviceName, row.hours ? hoursLabel(row.hours) : '', row.planName && row.planPrice.split(' / ')[0]]
+          {[
+            row.serviceName,
+            row.hours ? hoursLabel(row.hours) : '',
+            row.paidBy === 'membership' ? 'Membership visit (free)' : row.planName && row.planPrice.split(' / ')[0],
+          ]
             .filter(Boolean)
             .join(' · ')}
         </Line>
@@ -460,7 +476,9 @@ function Listing<T extends { name: string; status: string }>({ feed, statuses, e
       {visible.length === 0 ? (
         <Notice>Nothing matches that filter.</Notice>
       ) : (
-        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">{visible.map(render)}</ul>
+        // As many columns as fit with each card at least 22rem wide, so cards never get too
+        // narrow for their buttons, whatever the window size or browser zoom.
+        <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))] gap-4">{visible.map(render)}</ul>
       )}
     </>
   )
@@ -477,6 +495,7 @@ function Dashboard() {
   const saathis = useFeed<Saathi>('saathis')
   const staff = useLive<Staff>(watchAllStaff)
   const settlements = useLive<Settlement>(watchAllSettlements)
+  const memberships = useLive<Membership>(watchAllMemberships)
   const [percent, setPercent] = useState(DEFAULT_COMMISSION_PERCENT)
   useEffect(() => watchCommissionPercent(setPercent, () => undefined), [])
 
@@ -503,13 +522,14 @@ function Dashboard() {
   const tabs: { id: Tab; label: string; total: number | null }[] = [
     { id: 'bookings', label: 'Bookings', total: count(bookings) },
     { id: 'applications', label: 'Applications', total: count(applications) },
+    { id: 'memberships', label: 'Memberships', total: memberships.rows ? memberships.rows.filter((row) => row.status === 'active').length : null },
     { id: 'team', label: 'Saathis', total: verified.length },
     { id: 'money', label: 'Money', total: owing || null },
   ]
 
   return (
     <>
-      <div className="mb-6 grid grid-cols-2 gap-3 nav:grid-cols-4">
+      <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(min(100%,10rem),1fr))] gap-3">
         <Stat icon={ClipboardList} label="new" value={count(bookings, 'new')} highlight />
         <Stat icon={CalendarClock} label="to run" value={count(bookings, 'assigned')} />
         <Stat icon={UserRoundPlus} label="to verify" value={count(applications, 'pending')} />
@@ -534,7 +554,15 @@ function Dashboard() {
         ))}
       </div>
 
-      {tab === 'team' || tab === 'money' ? (
+      {tab === 'memberships' ? (
+        memberships.error ? (
+          <Notice>Could not load memberships: {memberships.error}. Publish the latest firestore.rules.</Notice>
+        ) : !memberships.rows || !bookings.rows ? (
+          <Notice>Loading…</Notice>
+        ) : (
+          <Memberships rows={memberships.rows} bookings={bookings.rows} />
+        )
+      ) : tab === 'team' || tab === 'money' ? (
         staff.error || settlements.error ? (
           <Notice>
             Could not load Saathi logins or payments: {staff.error || settlements.error}. Publish the latest firestore.rules.

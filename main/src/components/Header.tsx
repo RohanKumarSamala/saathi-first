@@ -1,9 +1,10 @@
-import { ArrowRight, ChevronDown, CircleUserRound, House, Menu, X } from 'lucide-react'
+import { ArrowRight, ChevronDown, CircleUserRound, Crown, House, Menu, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type SyntheticEvent } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import logo from '../assets/logo/logo-horizontal-light.svg'
 import { useAuth } from '../auth/context'
 import { navLinks, services } from '../content/site'
+import { useMembership } from '../hooks/useMembership'
 
 const linkClass =
   'relative z-10 whitespace-nowrap rounded-xl px-3.5 py-2 text-[0.8125rem] font-semibold uppercase leading-6 tracking-[0.04em] text-blush/75 transition-colors duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] hover:text-blush aria-[current=page]:text-blush 2xl:px-4'
@@ -108,6 +109,36 @@ function ServicesDropdown() {
 
 /** The separate admin website, e.g. https://admin.yourdomain.com (VITE_ADMIN_URL). */
 const adminSite = import.meta.env.VITE_ADMIN_URL as string | undefined
+
+/** The signed-in member's plan; null when there is none in force. */
+function useActiveMembership() {
+  const membership = useMembership()
+  const [now] = useState(() => new Date())
+  if (!membership || membership.status !== 'active' || membership.validUntil.toMillis() < now.getTime()) return null
+  return { planName: membership.planName }
+}
+
+/**
+ * Gold badge in the bar showing a member's plan, linking to My profile (where the visits left are).
+ */
+function MembershipBadge({ onClick }: { onClick?: () => void }) {
+  const active = useActiveMembership()
+  if (!active) return null
+  return (
+    <Link
+      to="/profile"
+      onClick={onClick}
+      aria-label={`${active.planName} membership`}
+      title={`${active.planName} membership`}
+      className="flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-gold/20 px-2.5 text-xs font-bold uppercase tracking-[0.04em] text-gold ring-1 ring-gold/40 transition-colors hover:bg-gold/30"
+    >
+      <Crown aria-hidden className="size-4" />
+      {/* The name shows where the bar has room: not on small phones, nor on laptop-width desktop bars. */}
+      <span className="hidden pr-0.5 sm:inline xl:hidden 2xl:inline">{active.planName}</span>
+    </Link>
+  )
+}
+
 
 /** Sign-in button for visitors; a small menu (admin link, sign out) once signed in. */
 function AccountMenu() {
@@ -328,6 +359,7 @@ export function Header() {
                 ))}
             </div>
             <span aria-hidden className="h-5 w-px bg-blush/15" />
+            <MembershipBadge />
             <AccountMenu />
             <Link
               to="/contact"
@@ -357,6 +389,7 @@ export function Header() {
           </nav>
 
           <div className="flex items-center gap-1 xl:hidden">
+            <MembershipBadge onClick={closeMenu} />
             <Link
               to="/"
               aria-label="Home"
