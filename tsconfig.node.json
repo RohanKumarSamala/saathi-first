@@ -19,5 +19,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["vite.config.ts"]
+  "include": ["main/vite.config.ts", "saathi/vite.config.ts", "admin/vite.config.ts"]
 }

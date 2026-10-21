@@ -1,0 +1,11 @@
+# GoDaddy cPanel (Apache): send every page URL to index.html so React Router can handle
+# /services, /book etc. on refresh. The HTTP -> HTTPS redirect is done by Cloudflare
+# ("Always Use HTTPS"), not here, so the site still loads before the certificate is installed.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>

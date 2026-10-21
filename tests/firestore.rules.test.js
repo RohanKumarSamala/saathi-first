@@ -21,6 +21,7 @@ import {
   Timestamp,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore'
 
 let env
@@ -38,6 +39,11 @@ const seed = (path, data) =>
   env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), path), data))
 
 const inDays = (days) => Timestamp.fromDate(new Date(Date.now() + days * 86_400_000))
+/** A visit `days` from now at an India time such as 10:30 (IST is UTC+5:30). */
+const istSlot = (days, hh = 10, mm = 30) => {
+  const day = new Date(Date.now() + days * 86_400_000)
+  return Timestamp.fromDate(new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hh, mm) - 330 * 60_000))
+}
 
 const booking = (uid, overrides = {}) => ({
   uid,
@@ -47,7 +53,7 @@ const booking = (uid, overrides = {}) => ({
   planName: 'Care Companion',
   planPrice: '₹499 / up to 4 hrs',
   hours: 3,
-  preferredStart: inDays(2),
+  preferredStart: istSlot(2),
   location: { lat: 17.385, lng: 78.4867, accuracy: 20 },
   address: 'Near the metro station',
   message: 'Hospital visit on Friday',
@@ -78,6 +84,21 @@ const application = (uid, overrides = {}) => ({
   createdAt: serverTimestamp(),
   ...overrides,
 })
+
+/**
+ * Books the way the website does: the booking, and the customer's list of bookings in progress
+ * (customers/{uid}.active), saved together in one write.
+ */
+async function book(store, data, asUid = data.uid) {
+  const mine = await getDocs(query(collection(store, 'bookings'), where('uid', '==', asUid)))
+  const active = mine.docs.filter((row) => ['new', 'assigned', 'started'].includes(row.data().status)).map((row) => row.id)
+  const ref = doc(collection(store, 'bookings'))
+  const batch = writeBatch(store)
+  batch.set(ref, data)
+  batch.set(doc(store, 'customers', asUid), { active: [...active, ref.id] })
+  await batch.commit()
+  return ref
+}
 
 before(async () => {
   env = await initializeTestEnvironment({
@@ -110,41 +131,62 @@ describe('admin role', () => {
 
 describe('bookings: who may create', () => {
   test('a signed-out visitor cannot book', async () => {
-    await assertFails(addDoc(collection(stranger(), 'bookings'), booking('anyone')))
+    await assertFails(book(stranger(), booking('anyone')))
   })
   test('an email account that has not confirmed its address cannot book', async () => {
-    await assertFails(addDoc(collection(db('newbie', UNVERIFIED), 'bookings'), booking('newbie')))
+    await assertFails(book(db('newbie', UNVERIFIED), booking('newbie')))
   })
   test('verified email and phone accounts can book', async () => {
-    await assertSucceeds(addDoc(collection(db('alice', VERIFIED), 'bookings'), booking('alice')))
-    await assertSucceeds(addDoc(collection(db('bob', PHONE), 'bookings'), booking('bob')))
+    await assertSucceeds(book(db('alice', VERIFIED), booking('alice')))
+    await assertSucceeds(book(db('bob', PHONE), booking('bob')))
   })
   test('phone numbers typed with +91, spaces or a leading 0 are accepted', async () => {
     for (const phone of ['+91 98765 43210', '098765-43210', '9876543210']) {
-      await assertSucceeds(addDoc(collection(db('alice', VERIFIED), 'bookings'), booking('alice', { phone })))
+      await assertSucceeds(book(db('alice', VERIFIED), booking('alice', { phone })))
     }
   })
+  test('visit times follow the form: 7 am first, ending by 11 pm, property visits by 8 pm', async () => {
+    const alice = () => db('alice', VERIFIED)
+    await assertSucceeds(book(alice(), booking('alice', { preferredStart: istSlot(2, 7, 0) })))
+    await assertSucceeds(book(alice(), booking('alice', { preferredStart: istSlot(2, 20, 0) }))) // 3 hours, ends 11 pm
+    await assertFails(book(alice(), booking('alice', { preferredStart: istSlot(2, 6, 30) })))
+    const property = { planId: 'property', planName: 'Property Monitoring', planPrice: '₹99 / per visit', hours: null,
+      serviceId: 'property-monitoring', serviceName: 'Property Monitoring' }
+    await assertSucceeds(book(alice(), booking('alice', { ...property, preferredStart: istSlot(2, 20, 0) })))
+    await assertFails(book(alice(), booking('alice', { ...property, preferredStart: istSlot(2, 20, 30) })))
+  })
   test('a booking without a location (typed address only) is accepted', async () => {
-    await assertSucceeds(addDoc(collection(db('alice', VERIFIED), 'bookings'), booking('alice', { location: null })))
+    await assertSucceeds(book(db('alice', VERIFIED), booking('alice', { location: null })))
+  })
+  test('the booking form’s exact payload is accepted (address in one line, +91 account number)', async () => {
+    await assertSucceeds(
+      book(db('alice', VERIFIED), booking('alice', {
+          phone: '+919876543210',
+          address: 'Flat 302, Green Residency, Road No. 12, Banjara Hills, near City Centre Mall, 500034',
+          location: null,
+          message: '',
+          hours: 4,
+          saathiId: '',
+          saathiName: '',
+          saathiChoice: 'none',
+        }),
+      ),
+    )
   })
   test('a booking with no Saathi preference is accepted', async () => {
     const plain = booking('alice')
     for (const key of ['saathiId', 'saathiName', 'saathiChoice']) delete plain[key]
-    await assertSucceeds(addDoc(collection(db('alice', VERIFIED), 'bookings'), plain))
+    await assertSucceeds(book(db('alice', VERIFIED), plain))
   })
   test('a whole-day booking (12 hours, Extended Companion) is accepted', async () => {
     await assertSucceeds(
-      addDoc(
-        collection(db('alice', VERIFIED), 'bookings'),
-        booking('alice', { hours: 12, planId: 'extended', planName: 'Extended Companion', planPrice: '₹1,299 / up to 12 hrs' }),
+      book(db('alice', VERIFIED), booking('alice', { hours: 12, planId: 'extended', planName: 'Extended Companion', planPrice: '₹1,299 / up to 12 hrs' }),
       ),
     )
   })
   test('a property visit is booked per visit, with no hours', async () => {
     await assertSucceeds(
-      addDoc(
-        collection(db('alice', VERIFIED), 'bookings'),
-        booking('alice', {
+      book(db('alice', VERIFIED), booking('alice', {
           serviceId: 'property-monitoring',
           serviceName: 'Property Monitoring',
           planId: 'property',
@@ -156,7 +198,61 @@ describe('bookings: who may create', () => {
     )
   })
   test('nobody can book in someone else’s name', async () => {
-    await assertFails(addDoc(collection(db('mallory', VERIFIED), 'bookings'), booking('alice')))
+    await assertFails(book(db('mallory', VERIFIED), booking('alice'), 'mallory'))
+  })
+})
+
+describe('bookings: at most 3 in progress per customer', () => {
+  const alice = () => db('alice', VERIFIED)
+  const list = async () => (await env.withSecurityRulesDisabled(async (ctx) => (await getDoc(doc(ctx.firestore(), 'customers/alice'))).data()))?.active ?? []
+
+  test('a fourth booking is refused while three are in progress', async () => {
+    for (let n = 0; n < 3; n++) await assertSucceeds(book(alice(), booking('alice')))
+    await assertFails(book(alice(), booking('alice')))
+  })
+  test('once one is cancelled or completed, the customer can book again', async () => {
+    const first = await book(alice(), booking('alice'))
+    await book(alice(), booking('alice'))
+    const third = await book(alice(), booking('alice'))
+    await assertSucceeds(updateDoc(first, { status: 'cancelled', cancelledAt: serverTimestamp(), cancelledBy: 'customer' }))
+    await env.withSecurityRulesDisabled((ctx) => updateDoc(doc(ctx.firestore(), 'bookings', third.id), { status: 'completed' }))
+    await assertSucceeds(book(alice(), booking('alice')))
+    await assertSucceeds(book(alice(), booking('alice')))
+    await assertFails(book(alice(), booking('alice')))
+  })
+  test('a booking cannot be created without being listed', async () => {
+    await assertFails(addDoc(collection(alice(), 'bookings'), booking('alice')))
+  })
+  const fakeBooking = (store) => {
+    const ref = doc(collection(store, 'bookings'))
+    return { ref, batch: writeBatch(store) }
+  }
+  test('a booking still in progress cannot be dropped from the list to make room', async () => {
+    for (let n = 0; n < 3; n++) await book(alice(), booking('alice'))
+    const [, ...rest] = await list()
+    const store = alice()
+    const { ref, batch } = fakeBooking(store)
+    batch.set(ref, booking('alice'))
+    batch.set(doc(store, 'customers', 'alice'), { active: [...rest, ref.id] })
+    await assertFails(batch.commit())
+  })
+  test('the list cannot be filled with made-up, other people’s or more than 3 entries', async () => {
+    await assertFails(setDoc(doc(alice(), 'customers', 'alice'), { active: ['made-up'] }))
+    const bobs = await book(db('bob', PHONE), booking('bob'))
+    await assertFails(setDoc(doc(alice(), 'customers', 'alice'), { active: [bobs.id] }))
+    await assertFails(setDoc(doc(alice(), 'customers', 'alice'), { active: [], extra: true }))
+    const store = alice()
+    const { ref, batch } = fakeBooking(store)
+    batch.set(ref, booking('alice'))
+    batch.set(doc(store, 'customers', 'alice'), { active: [ref.id, ref.id, ref.id, ref.id] })
+    await assertFails(batch.commit())
+  })
+  test('only the customer and admins can see the list', async () => {
+    await book(alice(), booking('alice'))
+    await assertSucceeds(getDoc(doc(alice(), 'customers', 'alice')))
+    await assertSucceeds(getDoc(doc(db('admin1', VERIFIED), 'customers', 'alice')))
+    await assertFails(getDoc(doc(db('mallory', VERIFIED), 'customers', 'alice')))
+    await assertFails(deleteDoc(doc(alice(), 'customers', 'alice')))
   })
 })
 
@@ -189,18 +285,21 @@ describe('bookings: what may be written', () => {
     'book a visit in the past': { preferredStart: inDays(-1) },
     'book a visit a year ahead': { preferredStart: inDays(365) },
     'send a visit time that is not a date': { preferredStart: 'tomorrow 10am' },
+    'book a visit at 3 am India time': { preferredStart: istSlot(2, 3, 0) },
+    'book a visit off the half hour': { preferredStart: istSlot(2, 10, 15) },
+    'book a 3-hour visit that ends after 11 pm': { preferredStart: istSlot(2, 21, 0) },
     'give no place at all (no location, no address)': { location: null, address: '' },
   }
   for (const [label, overrides] of Object.entries(tries)) {
     test(`cannot ${label}`, async () => {
-      await assertFails(addDoc(collection(db('alice', VERIFIED), 'bookings'), booking('alice', overrides)))
+      await assertFails(book(db('alice', VERIFIED), booking('alice', overrides)))
     })
   }
   test('cannot leave out required fields (phone, hours, visit time, service)', async () => {
     for (const key of ['phone', 'hours', 'preferredStart', 'serviceId']) {
       const missing = booking('alice')
       delete missing[key]
-      await assertFails(addDoc(collection(db('alice', VERIFIED), 'bookings'), missing))
+      await assertFails(book(db('alice', VERIFIED), missing))
     }
   })
 })
@@ -233,6 +332,18 @@ describe('bookings: reading and changing', () => {
   })
 })
 
+// What a Saathi records for a Care Companion visit (₹499) at the default 20% company share.
+const paid = (overrides = {}) => ({
+  billPaise: 49900,
+  extraPaise: 0,
+  totalPaise: 49900,
+  method: 'upi',
+  commissionPercent: 20,
+  companySharePaise: 9980,
+  saathiSharePaise: 39920,
+  ...overrides,
+})
+
 describe('bookings: assigning a Saathi and tracking the visit', () => {
   const visit = Timestamp.fromDate(new Date('2030-01-10T10:30:00+05:30'))
   const assignment = {
@@ -250,10 +361,25 @@ describe('bookings: assigning a Saathi and tracking the visit', () => {
     await seed('bookings/b1', { ...booking('alice'), createdAt: Timestamp.now() })
   })
 
-  test('the full journey works: assign, start, complete', async () => {
+  test('an admin assigns, but only the assigned Saathi starts or completes the visit', async () => {
     await assertSucceeds(updateDoc(admin(), assignment))
-    await assertSucceeds(updateDoc(admin(), { status: 'started', startedAt: serverTimestamp() }))
-    await assertSucceeds(updateDoc(admin(), { status: 'completed', completedAt: serverTimestamp() }))
+    await assertFails(updateDoc(admin(), { status: 'started', startedAt: serverTimestamp() }))
+    await assertFails(updateDoc(admin(), { status: 'completed', completedAt: serverTimestamp() }))
+    await assertFails(updateDoc(admin(), { status: 'completed', completedAt: serverTimestamp(), collection: paid() }))
+    await assertFails(updateDoc(admin(), { collection: paid() }))
+  })
+  test('an admin can cancel a started visit, but not complete it or move it back to assigned', async () => {
+    await seed('bookings/b1', {
+      ...booking('alice'),
+      ...assignment,
+      assignedAt: Timestamp.now(),
+      status: 'started',
+      startedAt: Timestamp.now(),
+      createdAt: Timestamp.now(),
+    })
+    await assertFails(updateDoc(admin(), { status: 'completed', completedAt: serverTimestamp(), collection: paid() }))
+    await assertFails(updateDoc(admin(), assignment))
+    await assertSucceeds(updateDoc(admin(), { status: 'cancelled', cancelledAt: serverTimestamp(), cancelledBy: 'admin' }))
   })
   test('the customer can see their assigned Saathi, number and visit time', async () => {
     await assertSucceeds(updateDoc(admin(), assignment))
@@ -303,23 +429,13 @@ describe('bookings: assigning a Saathi and tracking the visit', () => {
     )
     await assertFails(updateDoc(owner(), { status: 'cancelled', cancelledAt: serverTimestamp(), cancelledBy: 'admin' }))
   })
-  test('a customer can ask for more time once their Saathi is confirmed', async () => {
+  test('customers cannot ask for more time from the website (agreed with the Saathi at the visit instead)', async () => {
     await assertSucceeds(updateDoc(admin(), assignment))
-    await assertSucceeds(updateDoc(owner(), { extraHoursRequested: 2, extraRequestedAt: serverTimestamp() }))
-  })
-  test('a customer cannot ask for more time before confirmation, past a whole day, or for others', async () => {
     await assertFails(updateDoc(owner(), { extraHoursRequested: 2, extraRequestedAt: serverTimestamp() }))
-    await assertSucceeds(updateDoc(admin(), assignment))
-    await assertFails(updateDoc(owner(), { extraHoursRequested: 10, extraRequestedAt: serverTimestamp() }))
-    await assertFails(updateDoc(owner(), { extraHoursRequested: 0, extraRequestedAt: serverTimestamp() }))
-    await assertFails(updateDoc(owner(), { extraHoursRequested: 2, extraRequestedAt: serverTimestamp(), hours: 5 }))
-    await assertFails(
-      updateDoc(doc(db('mallory', VERIFIED), 'bookings/b1'), { extraHoursRequested: 2, extraRequestedAt: serverTimestamp() }),
-    )
   })
   test('an admin approves extra time by moving to the plan that covers it', async () => {
     await assertSucceeds(updateDoc(admin(), assignment))
-    await assertSucceeds(updateDoc(owner(), { extraHoursRequested: 2, extraRequestedAt: serverTimestamp() }))
+    await env.withSecurityRulesDisabled((ctx) => updateDoc(doc(ctx.firestore(), 'bookings/b1'), { extraHoursRequested: 2, extraRequestedAt: Timestamp.now() }))
     await assertFails(
       updateDoc(admin(), { hours: 5, extraHoursRequested: deleteField(), extraRequestedAt: deleteField() }),
     )
@@ -336,7 +452,7 @@ describe('bookings: assigning a Saathi and tracking the visit', () => {
   test('an admin can decline extra time, and cannot invent a customer request', async () => {
     await assertFails(updateDoc(admin(), { extraHoursRequested: 3 }))
     await assertSucceeds(updateDoc(admin(), assignment))
-    await assertSucceeds(updateDoc(owner(), { extraHoursRequested: 2, extraRequestedAt: serverTimestamp() }))
+    await env.withSecurityRulesDisabled((ctx) => updateDoc(doc(ctx.firestore(), 'bookings/b1'), { extraHoursRequested: 2, extraRequestedAt: Timestamp.now() }))
     await assertSucceeds(
       updateDoc(admin(), { extraHoursRequested: deleteField(), extraRequestedAt: deleteField(), extraDeclinedAt: serverTimestamp() }),
     )
@@ -350,16 +466,27 @@ describe('bookings: assigning a Saathi and tracking the visit', () => {
 
 describe('applications', () => {
   test('a verified applicant can apply', async () => {
-    await assertSucceeds(addDoc(collection(db('ravi', PHONE), 'applications'), application('ravi')))
+    await assertSucceeds(setDoc(doc(db('ravi', PHONE), 'applications', 'ravi'), application('ravi')))
   })
   test('a PAN-card applicant can apply with the full PAN', async () => {
     await assertSucceeds(
-      addDoc(collection(db('ravi', PHONE), 'applications'), application('ravi', { idType: 'pan', idNumber: 'ABCDE1234F' })),
+      setDoc(doc(db('ravi', PHONE), 'applications', 'ravi'), application('ravi', { idType: 'pan', idNumber: 'ABCDE1234F' })),
+    )
+  })
+  test('an applicant can save their own sign-in email, but not anyone else’s', async () => {
+    await assertSucceeds(
+      setDoc(doc(db('priya', VERIFIED), 'applications', 'priya'), application('priya', { email: 'priya@example.com' })),
+    )
+    await assertFails(
+      setDoc(doc(db('ravi', VERIFIED), 'applications', 'ravi'), application('ravi', { email: 'someone@example.com' })),
+    )
+    await assertFails(
+      setDoc(doc(db('asha', PHONE), 'applications', 'asha'), application('asha', { email: 'asha@example.com' })),
     )
   })
   test('unconfirmed email accounts and signed-out visitors cannot apply', async () => {
-    await assertFails(addDoc(collection(db('newbie', UNVERIFIED), 'applications'), application('newbie')))
-    await assertFails(addDoc(collection(stranger(), 'applications'), application('x')))
+    await assertFails(setDoc(doc(db('newbie', UNVERIFIED), 'applications', 'newbie'), application('newbie')))
+    await assertFails(setDoc(doc(stranger(), 'applications', 'x'), application('x')))
   })
   const tries = {
     'store a full Aadhaar number': { idNumber: '123412341234' },
@@ -376,9 +503,20 @@ describe('applications', () => {
   }
   for (const [label, overrides] of Object.entries(tries)) {
     test(`cannot ${label}`, async () => {
-      await assertFails(addDoc(collection(db('ravi', PHONE), 'applications'), application('ravi', overrides)))
+      await assertFails(setDoc(doc(db('ravi', PHONE), 'applications', 'ravi'), application('ravi', overrides)))
     })
   }
+  test('one application per person: it is saved under their own user ID', async () => {
+    await assertFails(setDoc(doc(db('ravi', PHONE), 'applications', 'random-id'), application('ravi')))
+    await assertFails(setDoc(doc(db('ravi', PHONE), 'applications', 'sita'), application('ravi')))
+    await assertSucceeds(setDoc(doc(db('ravi', PHONE), 'applications', 'ravi'), application('ravi')))
+    // A second application would overwrite the first, which only admins may change.
+    await assertFails(setDoc(doc(db('ravi', PHONE), 'applications', 'ravi'), application('ravi', { name: 'Again' })))
+  })
+  test('an applicant can look up their own application', async () => {
+    await seed('applications/ravi', { ...application('ravi'), createdAt: Timestamp.now() })
+    await assertSucceeds(getDocs(query(collection(db('ravi', PHONE), 'applications'), where('uid', '==', 'ravi'))))
+  })
   test('applicants cannot approve themselves; admins can, but only to a real status', async () => {
     await seed('applications/a1', { ...application('ravi'), createdAt: Timestamp.now() })
     await assertFails(updateDoc(doc(db('ravi', PHONE), 'applications/a1'), { status: 'verified' }))
@@ -389,6 +527,57 @@ describe('applications', () => {
     await seed('applications/a1', { ...application('ravi'), createdAt: Timestamp.now() })
     await assertFails(getDoc(doc(db('mallory', PHONE), 'applications/a1')))
     await assertFails(getDocs(collection(db('mallory', PHONE), 'applications')))
+  })
+})
+
+describe('full Aadhaar numbers', () => {
+  const applyWithAadhaar = async (ctx, uid, appOverrides = {}, secretOverrides = {}) => {
+    const store = ctx
+    const appRef = doc(store, 'applications', uid)
+    const batch = writeBatch(store)
+    batch.set(appRef, application(uid, appOverrides))
+    batch.set(doc(store, 'applicationSecrets', appRef.id), {
+      uid,
+      idNumber: '123412341234',
+      createdAt: serverTimestamp(),
+      ...secretOverrides,
+    })
+    await batch.commit()
+    return appRef.id
+  }
+
+  test('an applicant saves the full number together with their Aadhaar application', async () => {
+    await assertSucceeds(applyWithAadhaar(db('ravi', PHONE), 'ravi'))
+  })
+  test('only admins can read the full number; the applicant and others cannot', async () => {
+    const id = await applyWithAadhaar(db('ravi', PHONE), 'ravi')
+    await assertSucceeds(getDoc(doc(db('admin1', VERIFIED), 'applicationSecrets', id)))
+    await assertFails(getDoc(doc(db('ravi', PHONE), 'applicationSecrets', id)))
+    await assertFails(getDoc(doc(db('mallory', PHONE), 'applicationSecrets', id)))
+    await assertFails(getDoc(doc(stranger(), 'applicationSecrets', id)))
+    await assertFails(getDocs(collection(db('mallory', PHONE), 'applicationSecrets')))
+  })
+  test('a full number cannot be saved on its own, without its application', async () => {
+    await assertFails(
+      setDoc(doc(db('ravi', PHONE), 'applicationSecrets/orphan'), {
+        uid: 'ravi', idNumber: '123412341234', createdAt: serverTimestamp(),
+      }),
+    )
+  })
+  test('the full number must be 12 digits and belong to an Aadhaar application', async () => {
+    await assertFails(applyWithAadhaar(db('ravi', PHONE), 'ravi', {}, { idNumber: '1234' }))
+    await assertFails(applyWithAadhaar(db('ravi', PHONE), 'ravi', { idType: 'pan', idNumber: 'ABCDE1234F' }))
+    await assertFails(applyWithAadhaar(db('ravi', PHONE), 'ravi', {}, { uid: 'someone-else' }))
+    await assertFails(applyWithAadhaar(db('ravi', PHONE), 'ravi', {}, { extra: 'field' }))
+  })
+  test('the application itself still holds only the masked number', async () => {
+    await assertFails(setDoc(doc(db('ravi', PHONE), 'applications', 'ravi'), application('ravi', { idNumber: '123412341234' })))
+  })
+  test('nobody can change or delete a stored number, not even admins', async () => {
+    const id = await applyWithAadhaar(db('ravi', PHONE), 'ravi')
+    await assertFails(updateDoc(doc(db('admin1', VERIFIED), 'applicationSecrets', id), { idNumber: '999999999999' }))
+    await assertFails(updateDoc(doc(db('ravi', PHONE), 'applicationSecrets', id), { idNumber: '999999999999' }))
+    await assertFails(deleteDoc(doc(db('ravi', PHONE), 'applicationSecrets', id)))
   })
 })
 
@@ -410,6 +599,184 @@ describe('public Saathi profiles', () => {
   test('even admins cannot put private details (phone, ID) on a public profile', async () => {
     await assertFails(setDoc(doc(db('admin1', VERIFIED), 'saathis/s1'), { ...profile, mobile: '9123456780' }))
     await assertFails(setDoc(doc(db('admin1', VERIFIED), 'saathis/s1'), { ...profile, idNumber: 'ABCDE1234F' }))
+  })
+})
+
+describe('Saathi website: access', () => {
+  beforeEach(async () => {
+    await seed('applications/s1', { ...application('ravi', { status: 'verified' }), createdAt: Timestamp.now() })
+    await seed('applications/s2', { ...application('sita', { status: 'verified', name: 'Sita Rao' }), createdAt: Timestamp.now() })
+    await seed('applications/p1', { ...application('pending-person'), createdAt: Timestamp.now() })
+  })
+  const staff = (applicationId, overrides = {}) => ({
+    applicationId, name: 'Ravi Kumar', phone: '9123456780', active: true, createdAt: serverTimestamp(), ...overrides,
+  })
+
+  test('only admins can give a login access, and only for a verified application', async () => {
+    await assertFails(setDoc(doc(db('ravi', PHONE), 'staff/ravi'), staff('s1')))
+    await assertFails(setDoc(doc(db('admin1', VERIFIED), 'staff/someone'), staff('p1')))
+    await assertFails(setDoc(doc(db('admin1', VERIFIED), 'staff/ravi'), staff('s1', { role: 'admin' })))
+    await assertSucceeds(setDoc(doc(db('admin1', VERIFIED), 'staff/ravi'), staff('s1')))
+    await assertSucceeds(updateDoc(doc(db('admin1', VERIFIED), 'staff/ravi'), { active: false }))
+  })
+  test('a Saathi can read their own access record, not others’', async () => {
+    await seed('staff/ravi', { ...staff('s1'), createdAt: Timestamp.now() })
+    await seed('staff/sita', { ...staff('s2'), createdAt: Timestamp.now() })
+    await assertSucceeds(getDoc(doc(db('ravi', PHONE), 'staff/ravi')))
+    await assertFails(getDoc(doc(db('ravi', PHONE), 'staff/sita')))
+    await assertFails(getDocs(collection(db('ravi', PHONE), 'staff')))
+  })
+})
+
+describe('Saathi website: visits and collections', () => {
+  const visit = Timestamp.fromDate(new Date('2030-01-10T10:30:00+05:30'))
+  const assignedTo = (saathiId) => ({
+    ...booking('alice'),
+    createdAt: Timestamp.now(),
+    assignedSaathiId: saathiId,
+    assignedSaathiName: 'Ravi K.',
+    assignedSaathiPhone: '9123456780',
+    scheduledAt: visit,
+    assignedAt: Timestamp.now(),
+    status: 'assigned',
+  })
+  const ravi = () => db('ravi', PHONE)
+  const complete = (extra = {}) => ({ status: 'completed', completedAt: serverTimestamp(), collection: paid(), ...extra })
+
+  beforeEach(async () => {
+    await seed('applications/s1', { ...application('ravi', { status: 'verified' }), createdAt: Timestamp.now() })
+    await seed('applications/s2', { ...application('sita', { status: 'verified' }), createdAt: Timestamp.now() })
+    await seed('staff/ravi', { applicationId: 's1', name: 'Ravi Kumar', phone: '9123456780', active: true, createdAt: Timestamp.now() })
+    await seed('staff/sita', { applicationId: 's2', name: 'Sita', phone: '9123456781', active: true, createdAt: Timestamp.now() })
+    await seed('bookings/b1', assignedTo('s1'))
+    await seed('bookings/b2', assignedTo('s2'))
+  })
+
+  test('a Saathi sees the visits assigned to them, with the customer’s address', async () => {
+    const mine = await assertSucceeds(getDocs(query(collection(ravi(), 'bookings'), where('assignedSaathiId', '==', 's1'))))
+    if (mine.size !== 1 || !mine.docs[0].data().address) throw new Error('expected one visit with an address')
+    await assertSucceeds(getDoc(doc(ravi(), 'bookings/b1')))
+  })
+  test('a Saathi cannot see other Saathis’ visits or list all bookings', async () => {
+    await assertFails(getDoc(doc(ravi(), 'bookings/b2')))
+    await assertFails(getDocs(query(collection(ravi(), 'bookings'), where('assignedSaathiId', '==', 's2'))))
+    await assertFails(getDocs(collection(ravi(), 'bookings')))
+  })
+  test('a switched-off login loses access straight away', async () => {
+    await seed('staff/ravi', { applicationId: 's1', name: 'Ravi Kumar', phone: '9123456780', active: false, createdAt: Timestamp.now() })
+    await assertFails(getDoc(doc(ravi(), 'bookings/b1')))
+    await assertFails(updateDoc(doc(ravi(), 'bookings/b1'), complete()))
+  })
+  test('a login without access cannot read or change visits', async () => {
+    await assertFails(getDoc(doc(db('stranger', PHONE), 'bookings/b1')))
+    await assertFails(updateDoc(doc(db('stranger', PHONE), 'bookings/b1'), complete()))
+  })
+  test('a Saathi starts and completes their visit with what was collected', async () => {
+    await assertSucceeds(updateDoc(doc(ravi(), 'bookings/b1'), { status: 'started', startedAt: serverTimestamp() }))
+    await assertSucceeds(updateDoc(doc(ravi(), 'bookings/b1'), complete()))
+  })
+  test('a Saathi can complete straight from assigned, and record an extra charge with a reason', async () => {
+    await assertSucceeds(
+      updateDoc(doc(ravi(), 'bookings/b1'), complete({
+        collection: paid({ extraPaise: 10000, extraNote: 'One extra hour', totalPaise: 59900, companySharePaise: 11980, saathiSharePaise: 47920, method: 'cash' }),
+      })),
+    )
+  })
+  const cheats = {
+    'record a lower bill than the plan price': paid({ billPaise: 100, totalPaise: 100, companySharePaise: 20, saathiSharePaise: 80 }),
+    'lower the company share': paid({ companySharePaise: 100, saathiSharePaise: 49800 }),
+    'use a lower percentage': paid({ commissionPercent: 5, companySharePaise: 2495, saathiSharePaise: 47405 }),
+    'make the split not add up': paid({ saathiSharePaise: 49900 }),
+    'make the total not add up': paid({ totalPaise: 10000, companySharePaise: 2000, saathiSharePaise: 8000 }),
+    'add an extra charge with no reason': paid({ extraPaise: 5000, totalPaise: 54900, companySharePaise: 10980, saathiSharePaise: 43920 }),
+    'record a negative extra': paid({ extraPaise: -5000, extraNote: 'discount', totalPaise: 44900, companySharePaise: 8980, saathiSharePaise: 35920 }),
+    'use fractional paise': paid({ companySharePaise: 9980.5, saathiSharePaise: 39919.5 }),
+    'use an unknown payment method': paid({ method: 'crypto' }),
+    'add unknown fields': paid({ settled: true }),
+  }
+  for (const [label, collectionData] of Object.entries(cheats)) {
+    test(`a Saathi cannot ${label}`, async () => {
+      await assertFails(updateDoc(doc(ravi(), 'bookings/b1'), complete({ collection: collectionData })))
+    })
+  }
+  test('rounding: the company share rounds to the nearest paisa', async () => {
+    await seed('config/finance', { commissionPercent: 33, updatedAt: Timestamp.now() })
+    await seed('bookings/b3', { ...assignedTo('s1'), planId: 'quick', planName: 'Quick Companion', planPrice: '₹249 / up to 2 hrs', hours: 2 })
+    const extra = { extraPaise: 1, extraNote: 'one paisa extra' }
+    // 24901 paise at 33% = 8217.33 paise, so the share is 8217, not 8218.
+    await assertFails(updateDoc(doc(ravi(), 'bookings/b3'), complete({
+      collection: paid({ billPaise: 24900, ...extra, totalPaise: 24901, commissionPercent: 33, companySharePaise: 8218, saathiSharePaise: 16683 }),
+    })))
+    await assertSucceeds(updateDoc(doc(ravi(), 'bookings/b3'), complete({
+      collection: paid({ billPaise: 24900, ...extra, totalPaise: 24901, commissionPercent: 33, companySharePaise: 8217, saathiSharePaise: 16684 }),
+    })))
+  })
+  test('the percentage must be the one the admin set', async () => {
+    await seed('config/finance', { commissionPercent: 25, updatedAt: Timestamp.now() })
+    await assertFails(updateDoc(doc(ravi(), 'bookings/b1'), complete()))
+    await assertSucceeds(updateDoc(doc(ravi(), 'bookings/b1'), complete({
+      collection: paid({ commissionPercent: 25, companySharePaise: 12475, saathiSharePaise: 37425 }),
+    })))
+  })
+  test('a Saathi cannot change anything else on the visit', async () => {
+    await assertFails(updateDoc(doc(ravi(), 'bookings/b1'), { address: 'elsewhere' }))
+    await assertFails(updateDoc(doc(ravi(), 'bookings/b1'), { assignedSaathiId: 's2' }))
+    await assertFails(updateDoc(doc(ravi(), 'bookings/b1'), complete({ planId: 'property' })))
+    await assertFails(updateDoc(doc(ravi(), 'bookings/b1'), { status: 'cancelled' }))
+    await assertFails(updateDoc(doc(ravi(), 'bookings/b1'), { status: 'started', startedAt: Timestamp.fromDate(new Date('2000-01-01')) }))
+  })
+  test('a Saathi cannot complete someone else’s visit, or change a finished one', async () => {
+    await assertFails(updateDoc(doc(ravi(), 'bookings/b2'), complete()))
+    await assertSucceeds(updateDoc(doc(ravi(), 'bookings/b1'), complete()))
+    await assertFails(updateDoc(doc(ravi(), 'bookings/b1'), complete({ collection: paid({ method: 'cash' }) })))
+  })
+  test('admins can correct a collection, but a finished visit cannot be re-opened or moved', async () => {
+    await assertSucceeds(updateDoc(doc(ravi(), 'bookings/b1'), complete()))
+    const admin = doc(db('admin1', VERIFIED), 'bookings/b1')
+    await assertSucceeds(updateDoc(admin, { collection: paid({ method: 'cash' }) }))
+    await assertFails(updateDoc(admin, { collection: paid({ companySharePaise: 1, saathiSharePaise: 49899 }) }))
+    await assertFails(updateDoc(admin, { status: 'started' }))
+    await assertFails(updateDoc(admin, { assignedSaathiId: 's2' }))
+    await assertFails(updateDoc(admin, { collection: deleteField() }))
+  })
+  test('the customer can read what was collected on their visit', async () => {
+    await assertSucceeds(updateDoc(doc(ravi(), 'bookings/b1'), complete()))
+    await assertSucceeds(getDoc(doc(db('alice', VERIFIED), 'bookings/b1')))
+  })
+})
+
+describe('company share settings and payments', () => {
+  beforeEach(async () => {
+    await seed('applications/s1', { ...application('ravi', { status: 'verified' }), createdAt: Timestamp.now() })
+    await seed('staff/ravi', { applicationId: 's1', name: 'Ravi Kumar', phone: '9123456780', active: true, createdAt: Timestamp.now() })
+    await seed('staff/sita', { applicationId: 's2', name: 'Sita', phone: '9123456781', active: true, createdAt: Timestamp.now() })
+    await seed('settlements/pay_1', { saathiId: 's1', amountPaise: 9980, method: 'razorpay', createdAt: Timestamp.now() })
+  })
+  test('only admins can change the company share, to a whole percent from 0 to 100', async () => {
+    await assertFails(setDoc(doc(db('ravi', PHONE), 'config/finance'), { commissionPercent: 0, updatedAt: serverTimestamp() }))
+    await assertFails(setDoc(doc(db('admin1', VERIFIED), 'config/finance'), { commissionPercent: 120, updatedAt: serverTimestamp() }))
+    await assertFails(setDoc(doc(db('admin1', VERIFIED), 'config/finance'), { commissionPercent: 20.5, updatedAt: serverTimestamp() }))
+    await assertSucceeds(setDoc(doc(db('admin1', VERIFIED), 'config/finance'), { commissionPercent: 20, updatedAt: serverTimestamp() }))
+    await assertSucceeds(getDoc(doc(db('ravi', PHONE), 'config/finance')))
+  })
+  test('a Saathi sees their own payments only', async () => {
+    await assertSucceeds(getDocs(query(collection(db('ravi', PHONE), 'settlements'), where('saathiId', '==', 's1'))))
+    await assertFails(getDocs(query(collection(db('sita', PHONE), 'settlements'), where('saathiId', '==', 's1'))))
+    await assertFails(getDocs(collection(db('ravi', PHONE), 'settlements')))
+  })
+  test('a Saathi cannot record a payment themselves (only the server, after Razorpay confirms)', async () => {
+    await assertFails(setDoc(doc(db('ravi', PHONE), 'settlements/fake'), { saathiId: 's1', amountPaise: 9980, method: 'razorpay', createdAt: serverTimestamp() }))
+    await assertFails(updateDoc(doc(db('ravi', PHONE), 'settlements/pay_1'), { amountPaise: 99999 }))
+    await assertFails(getDocs(collection(db('ravi', PHONE), 'settlementOrders')))
+  })
+  test('admins can record a payment received another way, and never edit or delete one', async () => {
+    const manual = { saathiId: 's1', amountPaise: 5000, method: 'manual', note: 'Cash at office', recordedBy: 'admin1', createdAt: serverTimestamp() }
+    await assertSucceeds(addDoc(collection(db('admin1', VERIFIED), 'settlements'), manual))
+    await assertFails(addDoc(collection(db('admin1', VERIFIED), 'settlements'), { ...manual, method: 'razorpay' }))
+    await assertFails(addDoc(collection(db('admin1', VERIFIED), 'settlements'), { ...manual, amountPaise: 0 }))
+    await assertFails(addDoc(collection(db('admin1', VERIFIED), 'settlements'), { ...manual, recordedBy: 'someone' }))
+    await assertFails(updateDoc(doc(db('admin1', VERIFIED), 'settlements/pay_1'), { amountPaise: 1 }))
+    await assertFails(deleteDoc(doc(db('admin1', VERIFIED), 'settlements/pay_1')))
   })
 })
 

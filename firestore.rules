@@ -22,6 +22,19 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
+    // A Saathi who can use the Saathi website: an admin created staff/{their uid}, linking
+    // this login to their verified application, and has not switched it off.
+    function staffPath() {
+      return /databases/$(database)/documents/staff/$(request.auth.uid);
+    }
+    function isSaathi() {
+      return signedIn() && exists(staffPath()) && get(staffPath()).data.active == true;
+    }
+    // The application ID that identifies this Saathi on bookings and payments.
+    function mySaathiId() {
+      return get(staffPath()).data.applicationId;
+    }
+
     // Google accounts arrive with a verified email and phone accounts with a verified number;
     // email and password accounts must click the link in their verification email first.
     function verifiedContact() {
@@ -59,7 +72,7 @@ service cloud.firestore {
       );
     }
 
-    // Mirrors `plans` in src/content/site.ts. Change both together, then run npm run test:rules.
+    // Mirrors `plans` in main/src/content/site.ts. Change both together, then run npm run test:rules.
     function planHours() {
       return {'quick': 2, 'care': 4, 'day': 8, 'extended': 12};
     }
@@ -70,6 +83,11 @@ service cloud.firestore {
     function planPrices() {
       return {'property': '₹99 / per visit', 'quick': '₹249 / up to 2 hrs', 'care': '₹499 / up to 4 hrs',
               'day': '₹999 / up to 8 hrs', 'extended': '₹1,299 / up to 12 hrs'};
+    }
+
+    // What each plan bills, in paise (₹1 = 100). Mirrors planPaise in main/src/lib/finance.ts.
+    function planPaise() {
+      return {'property': 9900, 'quick': 24900, 'care': 49900, 'day': 99900, 'extended': 129900};
     }
 
     // Property Monitoring is one visit with no hours; every other service is booked by the hour
@@ -83,6 +101,18 @@ service cloud.firestore {
           || (data.serviceId != 'property-monitoring' && data.planId in planHours()
               && data.hours is int && data.hours >= 1 && data.hours <= planHours()[data.planId])
         );
+    }
+
+    // Mirrors the booking form: visits start on the half hour from 7 am India time (UTC+5:30),
+    // companion visits end by 11 pm, and property visits start by 8 pm.
+    function istMinutes(moment) {
+      return (moment.hours() * 60 + moment.minutes() + 330) % 1440;
+    }
+    function validVisitTime(data) {
+      let start = istMinutes(data.preferredStart);
+      return start >= 420 && start % 30 == 0
+        && data.preferredStart.seconds() == 0
+        && (data.hours == null ? start <= 1200 : start + data.hours * 60 <= 1380);
     }
 
     function validBooking(data) {
@@ -103,8 +133,9 @@ service cloud.firestore {
         && validPlan(data)
         // The visit is in the future, but not absurdly far ahead.
         && data.preferredStart is timestamp
-        && data.preferredStart > request.time
+        && data.preferredStart > request.time + duration.value(30, 'm')
         && data.preferredStart < request.time + duration.value(92, 'd')
+        && validVisitTime(data)
         && location(data.location)
         && text(data.address, 0, 300)
         // The Saathi must know where to go: a shared location, a typed address, or both.
@@ -115,7 +146,7 @@ service cloud.firestore {
         && (!('saathiChoice' in data) || data.saathiChoice in ['chosen', 'random', 'none']);
     }
 
-    // Mirrors src/lib/identity.ts. Aadhaar must arrive masked: only the last four digits.
+    // Mirrors main/src/lib/identity.ts. Aadhaar must arrive masked: only the last four digits.
     function validId(type, number) {
       return number is string && (
            (type == 'aadhaar' && number.matches('^XXXX XXXX [0-9]{4}$'))
@@ -130,7 +161,7 @@ service cloud.firestore {
       return data.keys().hasAll(['uid', 'name', 'mobile', 'age', 'area', 'languages', 'experience',
                                  'services', 'indianCitizen', 'idType', 'idNumber', 'consent',
                                  'status', 'createdAt'])
-        && data.keys().hasOnly(['uid', 'name', 'mobile', 'age', 'area', 'languages', 'experience',
+        && data.keys().hasOnly(['uid', 'name', 'mobile', 'email', 'age', 'area', 'languages', 'experience',
                                 'services', 'indianCitizen', 'idType', 'idNumber', 'consent',
                                 'status', 'createdAt'])
         && data.uid == request.auth.uid
@@ -138,6 +169,8 @@ service cloud.firestore {
         && stampedNow(data)
         && text(data.name, 1, 100)
         && phone(data.mobile)
+        // Optional: the applicant's own sign-in email, never someone else's.
+        && (!('email' in data) || data.email == request.auth.token.email)
         && data.age is int && data.age >= 18 && data.age <= 80
         && text(data.area, 1, 100)
         && text(data.languages, 0, 200)
@@ -164,32 +197,69 @@ service cloud.firestore {
         && data.get('scheduledAt', null) is timestamp;
     }
 
+    // ---------- Money ----------
+
+    // The company's share of each visit, in percent, set by admins in config/finance.
+    function commissionPercent() {
+      let path = /databases/$(database)/documents/config/finance;
+      return exists(path) ? get(path).data.commissionPercent : 20;
+    }
+
+    // What the Saathi collected and how it splits, all in whole paise. Mirrors buildCollection
+    // in main/src/lib/finance.ts: the bill is the booked plan's price, any extra needs a reason, and
+    // the company's share is the percentage rounded to the nearest paisa (halves up).
+    function validCollection(c, booking, percent) {
+      return c is map
+        && c.keys().hasAll(['billPaise', 'extraPaise', 'totalPaise', 'method', 'commissionPercent',
+                            'companySharePaise', 'saathiSharePaise'])
+        && c.keys().hasOnly(['billPaise', 'extraPaise', 'extraNote', 'totalPaise', 'method',
+                             'commissionPercent', 'companySharePaise', 'saathiSharePaise'])
+        && c.billPaise == planPaise().get(booking.planId, -1)
+        && c.extraPaise is int && c.extraPaise >= 0 && c.extraPaise <= 5000000
+        && (c.extraPaise == 0 ? !('extraNote' in c) : text(c.get('extraNote', ''), 3, 200))
+        && c.totalPaise == c.billPaise + c.extraPaise
+        && c.method in ['upi', 'cash']
+        && percent is int && percent >= 0 && percent <= 100
+        && c.commissionPercent == percent
+        && c.companySharePaise is int
+        && c.companySharePaise * 100 <= c.totalPaise * percent + 50
+        && c.companySharePaise * 100 > c.totalPaise * percent - 50
+        && c.saathiSharePaise == c.totalPaise - c.companySharePaise;
+    }
+
     // A progress time may only be written as "now" by the server, never back- or forward-dated.
     function stampedIfChanged(changed, key) {
       return !changed.hasAny([key]) || request.resource.data[key] == request.time;
     }
 
-    // Admins run the booking: assign a Saathi, start, complete or cancel. The customer's own
-    // details (name, phone, address, location, message, plan) can never be changed.
+    // Admins run the booking: assign a Saathi or cancel. Only the assigned Saathi starts and
+    // completes a visit (below). The customer's own details (name, phone, address, location,
+    // message, plan) can never be changed.
     function adminUpdatesBooking() {
       let data = request.resource.data;
       let changed = data.diff(resource.data).affectedKeys();
       return changed.hasOnly(['status', 'assignedSaathiId', 'assignedSaathiName', 'assignedSaathiPhone',
-                              'scheduledAt', 'assignedAt', 'startedAt', 'completedAt',
-                              'cancelledAt', 'cancelledBy', 'hours', 'planId', 'planName', 'planPrice',
-                              'extraHoursRequested', 'extraRequestedAt', 'extraDeclinedAt'])
+                              'scheduledAt', 'assignedAt', 'cancelledAt', 'cancelledBy', 'hours', 'planId', 'planName', 'planPrice',
+                              'extraHoursRequested', 'extraRequestedAt', 'extraDeclinedAt',
+                              'collection'])
+        // A finished visit is part of a Saathi's account: only its collection can be corrected.
+        && (resource.data.status != 'completed' || changed.hasOnly(['collection']))
+        // Correcting a finished visit's record needs a valid record of what was collected.
+        && (!changed.hasAny(['collection'])
+            || (resource.data.status == 'completed' && validCollection(data.get('collection', null), data,
+                               data.get('collection', {}).get('commissionPercent', -1))))
         // Hours and plan change only together and only to a consistent catalogue plan.
         && (!changed.hasAny(['hours', 'planId', 'planName', 'planPrice']) || validPlan(data))
         // Admins can clear an extra-time request but never invent one.
         && (!changed.hasAny(['extraHoursRequested']) || !('extraHoursRequested' in data))
         && (!changed.hasAny(['extraRequestedAt']) || !('extraRequestedAt' in data))
         && stampedIfChanged(changed, 'extraDeclinedAt')
-        && data.status in ['new', 'assigned', 'started', 'completed', 'cancelled']
+        // Admins only assign (before the visit starts) or cancel; never start or complete.
+        && (!changed.hasAny(['status']) || data.status == 'cancelled'
+            || (data.status == 'assigned' && resource.data.status in ['new', 'assigned']))
         // Assigned, started and completed visits always name a Saathi with a number and a time.
         && (data.status in ['new', 'cancelled'] || validAssignment(data))
         && stampedIfChanged(changed, 'assignedAt')
-        && stampedIfChanged(changed, 'startedAt')
-        && stampedIfChanged(changed, 'completedAt')
         && stampedIfChanged(changed, 'cancelledAt')
         && (!changed.hasAny(['cancelledBy']) || data.cancelledBy == 'admin');
     }
@@ -205,18 +275,82 @@ service cloud.firestore {
         && data.cancelledBy == 'customer';
     }
 
-    // A customer whose visit is confirmed or running may ask for more time, up to a whole day.
-    function customerRequestsMoreTime() {
+    // The Saathi assigned to a visit marks it started when they arrive.
+    function saathiStartsBooking() {
       let data = request.resource.data;
       let old = resource.data;
-      return old.uid == request.auth.uid
+      return old.get('assignedSaathiId', '') == mySaathiId()
+        && old.status == 'assigned'
+        && data.diff(old).affectedKeys().hasOnly(['status', 'startedAt'])
+        && data.status == 'started'
+        && data.startedAt == request.time;
+    }
+
+    // ...and completes it with what the customer paid, split at today's company share.
+    function saathiCompletesBooking() {
+      let data = request.resource.data;
+      let old = resource.data;
+      return old.get('assignedSaathiId', '') == mySaathiId()
         && old.status in ['assigned', 'started']
-        && old.get('hours', null) is int
-        && data.diff(old).affectedKeys().hasOnly(['extraHoursRequested', 'extraRequestedAt'])
-        && data.extraHoursRequested is int
-        && data.extraHoursRequested >= 1
-        && old.hours + data.extraHoursRequested <= 12
-        && data.extraRequestedAt == request.time;
+        && data.diff(old).affectedKeys().hasOnly(['status', 'completedAt', 'collection'])
+        && data.status == 'completed'
+        && data.completedAt == request.time
+        && validCollection(data.collection, old, commissionPercent());
+    }
+
+    // Saathi website access: which verified application this login belongs to.
+    function validStaff(data) {
+      return data.keys().hasAll(['applicationId', 'name', 'phone', 'active', 'createdAt'])
+        && data.keys().hasOnly(['applicationId', 'name', 'phone', 'active', 'createdAt'])
+        && text(data.applicationId, 1, 128)
+        && get(/databases/$(database)/documents/applications/$(data.applicationId)).data.status == 'verified'
+        && text(data.name, 1, 100)
+        && phone(data.phone)
+        && data.active is bool
+        && data.createdAt is timestamp;
+    }
+
+    // A payment an admin received outside Razorpay (cash at the office, bank transfer).
+    // Razorpay payments are written by the Saathi website's server, never by browsers.
+    function validManualSettlement(data) {
+      return data.keys().hasAll(['saathiId', 'amountPaise', 'method', 'note', 'recordedBy', 'createdAt'])
+        && data.keys().hasOnly(['saathiId', 'amountPaise', 'method', 'note', 'recordedBy', 'createdAt'])
+        && text(data.saathiId, 1, 128)
+        && exists(/databases/$(database)/documents/applications/$(data.saathiId))
+        && data.amountPaise is int && data.amountPaise >= 100 && data.amountPaise <= 100000000
+        && data.method == 'manual'
+        && text(data.note, 3, 200)
+        && data.recordedBy == request.auth.uid
+        && data.createdAt == request.time;
+    }
+
+    // ---------- Active-booking limit ----------
+
+    function customerPath(uid) {
+      return /databases/$(database)/documents/customers/$(uid);
+    }
+
+    // After this write, the booking exists, is this customer's, and is still in progress.
+    function inProgress(bookingId) {
+      let path = /databases/$(database)/documents/bookings/$(bookingId);
+      return bookingId is string
+        && existsAfter(path)
+        && getAfter(path).data.uid == request.auth.uid
+        && getAfter(path).data.status in ['new', 'assigned', 'started'];
+    }
+
+    // The list holds at most 3, so each position is checked by hand (rules have no loops).
+    function allInProgress(list) {
+      return (list.size() < 1 || inProgress(list[0]))
+        && (list.size() < 2 || inProgress(list[1]))
+        && (list.size() < 3 || inProgress(list[2]));
+    }
+
+    // Nothing still in progress may be dropped from the list to make room.
+    function keepsInProgress(old, next) {
+      return (old.size() < 1 || old[0] in next || !inProgress(old[0]))
+        && (old.size() < 2 || old[1] in next || !inProgress(old[1]))
+        && (old.size() < 3 || old[2] in next || !inProgress(old[2]));
     }
 
     // Public profiles carry first name + initial, area, languages and services. No phone or ID.
@@ -239,20 +373,93 @@ service cloud.firestore {
 
     // Customer requests from the Contact page.
     match /bookings/{id} {
-      allow create: if signedIn() && verifiedContact() && validBooking(request.resource.data);
-      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+      // Every new booking is listed in the customer's customers/{uid}.active in the same write,
+      // which holds at most MAX_ACTIVE_BOOKINGS entries (see below).
+      allow create: if signedIn() && verifiedContact() && validBooking(request.resource.data)
+        && existsAfter(customerPath(request.auth.uid))
+        && id in getAfter(customerPath(request.auth.uid)).data.active;
+      // The customer, admins, and the Saathi assigned to the visit (who needs the address).
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid)
+        || (isSaathi() && resource.data.assignedSaathiId == mySaathiId());
       allow update: if (isAdmin() && adminUpdatesBooking())
         || (signedIn() && customerCancelsBooking())
-        || (signedIn() && customerRequestsMoreTime());
+        || (isSaathi() && saathiStartsBooking())
+        || (isSaathi() && saathiCompletesBooking());
       allow delete: if false;
+    }
+
+    // A customer's bookings still in progress (new, assigned or started): at most 3 at a time.
+    // A booking may only join the list in the same write that creates it, and an entry may
+    // only leave once that booking is cancelled or completed, so the limit cannot be dodged.
+    match /customers/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['active'])
+        && request.resource.data.active is list
+        && request.resource.data.active.size() <= 3
+        && allInProgress(request.resource.data.active)
+        && keepsInProgress(resource == null ? [] : resource.data.get('active', []), request.resource.data.active);
+      allow delete: if false;
+    }
+
+    // Logins that may use the Saathi website, created by admins.
+    match /staff/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create, update: if isAdmin() && validStaff(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Business settings that both websites read; only admins change them.
+    match /config/finance {
+      allow read: if signedIn();
+      allow write: if isAdmin()
+        && request.resource.data.keys().hasOnly(['commissionPercent', 'updatedAt'])
+        && request.resource.data.commissionPercent is int
+        && request.resource.data.commissionPercent >= 0
+        && request.resource.data.commissionPercent <= 100
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    // Payments of the company's share. Razorpay payments are recorded by the server after it
+    // checks them with Razorpay; admins can add payments received another way. Never edited.
+    match /settlements/{id} {
+      allow read: if isAdmin() || (isSaathi() && resource.data.saathiId == mySaathiId());
+      allow create: if isAdmin() && validManualSettlement(request.resource.data);
+      allow update, delete: if false;
+    }
+
+    // Razorpay orders in progress: server only.
+    match /settlementOrders/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     // Applications from the Become a Saathi page.
     match /applications/{id} {
-      allow create: if signedIn() && verifiedContact() && validApplication(request.resource.data);
+      // One application per person, saved under their own user ID.
+      allow create: if signedIn() && verifiedContact() && id == request.auth.uid
+        && validApplication(request.resource.data);
       allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
       allow update: if isAdmin() && statusChangeTo(['pending', 'verified', 'rejected']);
       allow delete: if false;
+    }
+
+    // Full Aadhaar numbers, kept apart from the application (which holds only the masked
+    // form) so that they never reach the applicant's view, the public page or any list.
+    // Admins alone can read them. An applicant can create one only in the same write as their
+    // own Aadhaar application with the same ID, and nobody can change or delete it afterwards.
+    match /applicationSecrets/{id} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'idNumber', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.idNumber is string
+        && request.resource.data.idNumber.matches('^[0-9]{12}$')
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/applications/$(id)).data.uid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/applications/$(id)).data.idType == 'aadhaar'
+        && !exists(/databases/$(database)/documents/applications/$(id));
+      allow read: if isAdmin();
+      allow update, delete: if false;
     }
 
     // Public profiles of verified Saathis, shown on the Our Saathis page.

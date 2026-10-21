@@ -4,8 +4,77 @@
     {
       "name": "saathi-first",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "5173", "--strictPort"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5173",
+        "--strictPort"
+      ],
       "port": 5173
+    },
+    {
+      "name": "saathi-site",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:saathi",
+        "--",
+        "--port",
+        "5174",
+        "--strictPort"
+      ],
+      "port": 5174
+    },
+    {
+      "name": "admin-site",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:admin",
+        "--",
+        "--port",
+        "5175",
+        "--strictPort"
+      ],
+      "port": 5175
+    },
+    {
+      "name": "emulators",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "emulators"
+      ],
+      "port": 9099
+    },
+    {
+      "name": "test-main",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:test"
+      ],
+      "port": 5183
+    },
+    {
+      "name": "test-saathi",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:test:saathi"
+      ],
+      "port": 5184
+    },
+    {
+      "name": "test-admin",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:test:admin"
+      ],
+      "port": 5185
     }
   ]
 }

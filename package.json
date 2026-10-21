@@ -4,16 +4,26 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "vite --config main/vite.config.ts",
+    "build": "tsc -b && vite build --config main/vite.config.ts",
+    "dev:saathi": "vite --config saathi/vite.config.ts",
+    "build:saathi": "tsc -p saathi && tsc -p saathi/tsconfig.server.json && vite build --config saathi/vite.config.ts",
+    "dev:admin": "vite --config admin/vite.config.ts",
+    "build:admin": "tsc -p admin && vite build --config admin/vite.config.ts",
+    "build:all": "npm run build && npm run build:saathi && npm run build:admin",
     "lint": "oxlint",
-    "preview": "vite preview",
-    "test:rules": "node scripts/test-rules.mjs"
+    "preview": "vite preview --config main/vite.config.ts",
+    "test:rules": "node scripts/test-rules.mjs",
+    "emulators": "firebase emulators:start --only auth,firestore --project demo-saathi-first",
+    "dev:test": "vite --config main/vite.config.ts --mode emulator --port 5183",
+    "dev:test:saathi": "vite --config saathi/vite.config.ts --mode emulator --port 5184",
+    "dev:test:admin": "vite --config admin/vite.config.ts --mode emulator --port 5185"
   },
   "dependencies": {
     "@fontsource-variable/montserrat": "^5.3.0",
     "@fontsource-variable/playfair-display": "^5.3.0",
     "firebase": "^13.0.0",
+    "jose": "^6.2.12",
     "lucide-react": "^1.55.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -30,5 +40,8 @@
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.14.6"
   }
 }

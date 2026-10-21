@@ -27,7 +27,7 @@ function stopEmulator() {
 stopEmulator()
 const result = spawnSync(
   'firebase',
-  ['emulators:exec', '--only', 'firestore', '--project', 'demo-saathi-first', '"node --test tests/firestore.rules.test.js"'],
+  ['emulators:exec', '--only', 'firestore', '--project', 'demo-saathi-first', '"node --test --test-concurrency=1 tests/firestore.rules.test.js tests/settlement.test.ts"'],
   { stdio: 'inherit', shell: true },
 )
 stopEmulator()
