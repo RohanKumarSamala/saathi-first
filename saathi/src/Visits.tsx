@@ -27,9 +27,18 @@ function VisitCard({ row, percent }: { row: Stored<Booking>; percent: number }) 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const started = row.status === 'started'
+  const [now] = useState(() => new Date())
+  const start = (row.scheduledAt ?? row.preferredStart)?.toDate()
+  const stage = started
+    ? 'In progress'
+    : start && start.toDateString() !== now.toDateString() && start.getTime() < now.getTime()
+      ? 'Late'
+      : start && start.toDateString() === now.toDateString()
+        ? 'Today'
+        : 'Upcoming'
   const greeting = `Hello ${row.name}, this is ${row.assignedSaathiName ?? 'your Saathi'} from Saathi First about your visit.`
 
-  const start = async () => {
+  const begin = async () => {
     setBusy(true)
     setError('')
     try {
@@ -43,12 +52,16 @@ function VisitCard({ row, percent }: { row: Stored<Booking>; percent: number }) 
 
   return (
     <li className="overflow-hidden rounded-3xl bg-white shadow-[0_16px_40px_-24px_rgb(58_17_25/0.5)] ring-1 ring-gold/25">
-      <div className={`flex items-center justify-between gap-3 px-5 py-3 text-sm font-semibold ${started ? 'bg-burgundy text-blush' : 'bg-blush text-wine'}`}>
+      <div
+        className={`flex items-center justify-between gap-3 px-5 py-3 text-sm font-semibold ${
+          started ? 'bg-burgundy text-blush' : stage === 'Late' ? 'bg-rosewood text-white' : 'bg-blush text-wine'
+        }`}
+      >
         <span className="flex items-center gap-2">
           <CalendarClock aria-hidden className="size-4" />
           {when(row)}
         </span>
-        <span>{started ? 'In progress' : 'Upcoming'}</span>
+        <span className="shrink-0 whitespace-nowrap">{stage}</span>
       </div>
 
       <div className="grid gap-4 p-5">
@@ -130,7 +143,7 @@ function VisitCard({ row, percent }: { row: Stored<Booking>; percent: number }) 
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => void start()}
+                onClick={() => void begin()}
                 className="flex h-12 items-center justify-center gap-2 rounded-xl font-semibold text-burgundy ring-1 ring-burgundy/25 transition-colors hover:bg-burgundy/10 disabled:opacity-60"
               >
                 <Play aria-hidden className="size-4" />
@@ -185,21 +198,54 @@ function DoneCard({ row, outstandingPaise }: { row: Stored<Booking>; outstanding
   )
 }
 
+type View = 'today' | 'upcoming' | 'completed'
+
+const startOf = (row: Stored<Booking>) => (row.scheduledAt ?? row.preferredStart)?.toDate() ?? null
+const dayKey = (date: Date) => date.toDateString()
+
 export function Visits({ visits, percent, account, onPay }: {
   visits: Stored<Booking>[]
   percent: number
   account: Ledger<Stored<Booking>>
   onPay: () => void
 }) {
-  const active = visits.filter((row) => row.status === 'assigned' || row.status === 'started')
+  const [now] = useState(() => new Date())
+  const active = visits
+    .filter((row) => row.status === 'assigned' || row.status === 'started')
+    .sort((a, b) => (startOf(a)?.getTime() ?? 0) - (startOf(b)?.getTime() ?? 0))
+  // Today holds anything in progress or due today, and anything late (an earlier day, not done).
+  const isToday = (row: Stored<Booking>) => {
+    const start = startOf(row)
+    return row.status === 'started' || !start || start.getTime() < now.getTime() || dayKey(start) === dayKey(now)
+  }
+  const today = active.filter(isToday)
+  const upcoming = active.filter((row) => !isToday(row))
   const done = visits
     .filter((row) => row.status === 'completed')
     .sort((a, b) => (b.completedAt?.toMillis() ?? 0) - (a.completedAt?.toMillis() ?? 0))
-    .slice(0, 15)
   const outstanding = new Map(account.items.map((item) => [item.row.id, item.outstandingPaise]))
+  const [view, setView] = useState<View>(today.length || !upcoming.length ? 'today' : 'upcoming')
+
+  // Upcoming visits under a heading per day, e.g. "Tomorrow" or "Saturday, 31 October".
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+  const days = new Map<string, Stored<Booking>[]>()
+  for (const row of upcoming) {
+    const start = startOf(row)!
+    const label =
+      dayKey(start) === dayKey(tomorrow)
+        ? 'Tomorrow'
+        : start.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })
+    days.set(label, [...(days.get(label) ?? []), row])
+  }
+
+  const tabs: { id: View; label: string; count: number }[] = [
+    { id: 'today', label: 'Today', count: today.length },
+    { id: 'upcoming', label: 'Upcoming', count: upcoming.length },
+    { id: 'completed', label: 'Completed', count: done.length },
+  ]
 
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-5">
       {account.overdue && (
         <button
           type="button"
@@ -211,29 +257,65 @@ export function Visits({ visits, percent, account, onPay }: {
         </button>
       )}
 
-      <section>
-        <h2 className="mb-3 text-lg font-semibold">Your visits</h2>
-        {active.length === 0 ? (
-          <Notice>No visits assigned right now. New visits appear here by themselves.</Notice>
+      <div role="tablist" aria-label="Visits" className="grid grid-cols-3 gap-1 rounded-2xl bg-white/85 p-1 ring-1 ring-gold/25">
+        {tabs.map(({ id, label, count }) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={view === id}
+            onClick={() => setView(id)}
+            className={`flex items-center justify-center gap-1.5 rounded-xl px-2 py-2.5 text-sm font-semibold transition-colors ${
+              view === id ? 'bg-burgundy text-blush' : 'text-burgundy hover:bg-burgundy/[0.06]'
+            }`}
+          >
+            {label}
+            {count > 0 && (
+              <span className={`rounded-full px-1.5 text-xs ${view === id ? 'bg-blush/20' : 'bg-burgundy/10'}`}>{count}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {view === 'today' &&
+        (today.length === 0 ? (
+          <Notice>
+            No visits today.{upcoming.length > 0 && ' Your next ones are under Upcoming.'} New visits appear by themselves.
+          </Notice>
         ) : (
           <ul className="grid gap-4">
-            {active.map((row) => (
+            {today.map((row) => (
               <VisitCard key={row.id} row={row} percent={percent} />
             ))}
           </ul>
-        )}
-      </section>
+        ))}
 
-      {done.length > 0 && (
-        <section>
-          <h2 className="mb-3 text-lg font-semibold">Completed</h2>
+      {view === 'upcoming' &&
+        (upcoming.length === 0 ? (
+          <Notice>Nothing coming up yet. New visits appear here by themselves.</Notice>
+        ) : (
+          [...days].map(([label, rows]) => (
+            <section key={label}>
+              <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.06em] text-ink-muted">{label}</h2>
+              <ul className="grid gap-4">
+                {rows.map((row) => (
+                  <VisitCard key={row.id} row={row} percent={percent} />
+                ))}
+              </ul>
+            </section>
+          ))
+        ))}
+
+      {view === 'completed' &&
+        (done.length === 0 ? (
+          <Notice>No completed visits yet.</Notice>
+        ) : (
           <ul className="grid gap-2">
             {done.map((row) => (
               <DoneCard key={row.id} row={row} outstandingPaise={outstanding.get(row.id)} />
             ))}
           </ul>
-        </section>
-      )}
+        ))}
     </div>
   )
 }

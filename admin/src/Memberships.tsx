@@ -4,12 +4,12 @@ import { memberships as plans } from '../../main/src/content/site'
 import { friendlyWhen } from '../../main/src/lib/contact'
 import type { Booking, Stored } from '../../main/src/lib/db'
 import {
-  adjustUsed,
+  currentPlanOf,
   monthKey,
   monthName,
   saveMembership,
-  setMembershipStatus,
   untilAfterMonths,
+  updateMembership,
   type Membership,
 } from '../../main/src/lib/membership'
 
@@ -44,7 +44,12 @@ function useAction() {
 }
 
 /** Switch a membership on for a customer, after they have paid the office. */
-function Activate({ customers, existing, onDone }: { customers: Customer[]; existing: Map<string, Stored<Membership>>; onDone: () => void }) {
+function Activate({ customers, existing, onDone, onCancel }: {
+  customers: Customer[]
+  existing: Map<string, Stored<Membership>>
+  onDone: () => void
+  onCancel: () => void
+}) {
   const [uid, setUid] = useState('')
   const [planId, setPlanId] = useState(plans[0]?.id ?? '')
   const [from, setFrom] = useState(() => inputDate(new Date()))
@@ -144,13 +149,18 @@ function Activate({ customers, existing, onDone }: { customers: Customer[]; exis
           {error}
         </p>
       )}
-      <button
-        type="submit"
-        disabled={busy || !uid.trim()}
-        className="h-11 rounded-xl bg-burgundy font-semibold text-blush transition-colors hover:bg-wine disabled:opacity-50"
-      >
-        {busy ? 'Saving…' : 'Switch on membership'}
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="submit"
+          disabled={busy || !uid.trim()}
+          className="h-11 grow rounded-xl bg-burgundy px-5 font-semibold text-blush transition-colors hover:bg-wine disabled:opacity-50"
+        >
+          {busy ? 'Saving…' : 'Switch on membership'}
+        </button>
+        <button type="button" onClick={onCancel} className="h-11 rounded-xl px-5 font-semibold text-ink-muted hover:bg-wine/10">
+          Cancel
+        </button>
+      </div>
     </form>
   )
 }
@@ -163,13 +173,17 @@ function MembershipCard({ row, customer, now }: { row: Stored<Membership>; custo
   const expired = until.getTime() < now.getTime()
   const state = row.status === 'cancelled' ? 'Stopped' : expired ? 'Expired' : 'Active'
   const tone = state === 'Active' ? 'bg-emerald-100 text-emerald-800' : 'bg-wine/10 text-ink-muted'
+  // A record saved before the plans were renamed: any change below saves it under its new plan.
+  const plan = currentPlanOf(row)
+  const renamed = plan.id !== row.planId || plan.visitsPerMonth !== row.visitsPerMonth
+  const setUsed = (value: number) => run(() => updateMembership(row, { used: { ...row.used, [key]: Math.max(value, 0) } }))
 
   const renew = () => {
     // Renewing an active membership adds a month to its end; an ended one restarts from today.
     const from = expired || row.status === 'cancelled' ? now : row.validFrom.toDate()
     const end = untilAfterMonths(expired || row.status === 'cancelled' ? now : new Date(until.getTime() + 1000), 1)
-    if (!window.confirm(`Renew ${row.planName} until ${day(end)}?`)) return
-    void run(() => saveMembership({ uid: row.id, planId: row.planId, from, until: end, note: row.note ?? '', used: row.used }))
+    if (!window.confirm(`Renew ${plan.name} until ${day(end)}?`)) return
+    void run(() => saveMembership({ uid: row.id, planId: plan.id, from, until: end, note: row.note ?? '', used: row.used }))
   }
 
   return (
@@ -184,19 +198,30 @@ function MembershipCard({ row, customer, now }: { row: Stored<Membership>; custo
       <p className="text-sm">
         <strong>{row.planName}</strong> · {row.visitsPerMonth} visits a month · {day(row.validFrom.toDate())} – {day(until)}
       </p>
+      {renamed && (
+        <div className="grid gap-2 rounded-xl bg-gold/20 px-3 py-2 text-sm">
+          <p>
+            Old plan name. It is now <strong>{plan.name}</strong> ({plan.visitsPerMonth} visits a month); the customer cannot
+            book free visits until it is moved.
+          </p>
+          <button type="button" disabled={busy} onClick={() => void run(() => updateMembership(row, {}))} className={`${small} justify-self-start`}>
+            Move to {plan.name}
+          </button>
+        </div>
+      )}
       {row.note && <p className="text-xs text-ink-muted">{row.note}</p>}
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="grow">
           {monthName(now)}: <strong>{used}</strong> of {row.visitsPerMonth} used
         </span>
-        <button type="button" aria-label="One visit fewer" disabled={busy || used === 0} onClick={() => void run(() => adjustUsed(row.id, key, used - 1))} className={small}>
+        <button type="button" aria-label="One visit fewer" disabled={busy || used === 0} onClick={() => void setUsed(used - 1)} className={small}>
           <Minus aria-hidden className="size-4" />
         </button>
         <button
           type="button"
           aria-label="One visit more"
-          disabled={busy || used >= row.visitsPerMonth}
-          onClick={() => void run(() => adjustUsed(row.id, key, used + 1))}
+          disabled={busy || used >= plan.visitsPerMonth}
+          onClick={() => void setUsed(used + 1)}
           className={small}
         >
           <Plus aria-hidden className="size-4" />
@@ -210,13 +235,13 @@ function MembershipCard({ row, customer, now }: { row: Stored<Membership>; custo
           <button
             type="button"
             disabled={busy}
-            onClick={() => window.confirm('Stop this membership? Visits already booked stay booked.') && void run(() => setMembershipStatus(row.id, 'cancelled'))}
+            onClick={() => window.confirm('Stop this membership? Visits already booked stay booked.') && void run(() => updateMembership(row, { status: 'cancelled' }))}
             className={small}
           >
             Stop
           </button>
         ) : (
-          <button type="button" disabled={busy} onClick={() => void run(() => setMembershipStatus(row.id, 'active'))} className={small}>
+          <button type="button" disabled={busy} onClick={() => void run(() => updateMembership(row, { status: 'active' }))} className={small}>
             Resume
           </button>
         )}
@@ -234,6 +259,7 @@ function MembershipCard({ row, customer, now }: { row: Stored<Membership>; custo
 /** Monthly memberships: switch them on after payment, renew, stop, and correct a month's count. */
 export function Memberships({ rows, bookings }: { rows: Stored<Membership>[]; bookings: Stored<Booking>[] }) {
   const [term, setTerm] = useState('')
+  const [adding, setAdding] = useState(false)
   const [now] = useState(() => new Date())
   const customers = useMemo(() => {
     const byUid = new Map<string, Customer>()
@@ -249,7 +275,26 @@ export function Memberships({ rows, bookings }: { rows: Stored<Membership>[]; bo
 
   return (
     <div className="grid gap-6">
-      <Activate customers={customers} existing={existing} onDone={() => setTerm('')} />
+      {/* Folded away until needed, so the memberships themselves come first. */}
+      {adding ? (
+        <Activate
+          customers={customers}
+          existing={existing}
+          onDone={() => {
+            setTerm('')
+            setAdding(false)
+          }}
+          onCancel={() => setAdding(false)}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="flex items-center justify-center gap-2 justify-self-start rounded-full bg-burgundy px-5 py-2.5 font-semibold text-blush transition-colors hover:bg-wine"
+        >
+          <Plus aria-hidden className="size-4" /> Switch on a membership
+        </button>
+      )}
       <section className="grid gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-semibold">Memberships ({rows.length})</h2>

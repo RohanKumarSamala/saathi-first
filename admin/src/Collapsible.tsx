@@ -2,7 +2,7 @@ import { ChevronDown } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 /**
- * The detail area of an admin card: up to about four lines, each kept to one line, so
+ * The detail area of an admin card: exactly four lines, each kept to one line, so
  * cards stay compact. When something is hidden, "Show more" opens the full details as an
  * extension floating over the card, so the card and its row never change size.
  * "Show less", Escape or a click outside closes it.
@@ -71,13 +71,11 @@ export function Collapsible({ children }: { children: ReactNode }) {
           className={`group/clamp ${
             open
               ? 'absolute -inset-x-3 -top-2 z-20 rounded-2xl bg-white p-3 pt-2 shadow-[0_24px_50px_-20px_rgb(58_17_25/0.5)] ring-1 ring-gold/40'
-              : 'relative max-h-[6.25rem] overflow-hidden'
+              : // Four 1.25rem lines and the three 0.375rem gaps between them, cut cleanly.
+                'relative max-h-[6.125rem] overflow-hidden'
           }`}
         >
           <div className="grid grid-cols-[minmax(0,1fr)] content-start gap-1.5">{children}</div>
-          {!open && overflowing && (
-            <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-white to-transparent" />
-          )}
           {open && <div className="mt-2">{button}</div>}
         </div>
       </div>

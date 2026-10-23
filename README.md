@@ -126,7 +126,7 @@ that customer and admins can see it; it never appears on the public Our Saathis 
 
 ### Monthly memberships
 
-Basic, Silver and Premium Care (`memberships` in `main/src/content/site.ts`) give 4, 8 or 16 free
+Silver and Golden Care (`memberships` in `main/src/content/site.ts`) give 4 or 8 free
 visits each calendar month, up to 2 hours each, for the services the plan includes (`servicePlans`).
 Unused visits expire at the month's end.
 

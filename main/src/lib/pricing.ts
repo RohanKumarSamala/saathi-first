@@ -6,9 +6,13 @@ export const isPerVisitService = (serviceId: string) => serviceId === PROPERTY_S
 
 export const propertyPlan = plans.find((plan) => plan.id === 'property') as Plan
 
+/** A service's own fixed plan (Emergency Care for Emergency Support), if it has one. */
+export const fixedPlanFor = (serviceId: string) =>
+  plans.find((plan): plan is Plan & { hours: number } => plan.onlyFor === serviceId && typeof plan.hours === 'number')
+
 /** Hourly companion plans, shortest first. */
 export const companionPlans = plans
-  .filter((plan): plan is Plan & { hours: number } => typeof plan.hours === 'number')
+  .filter((plan): plan is Plan & { hours: number } => typeof plan.hours === 'number' && !plan.onlyFor)
   .sort((a, b) => a.hours - b.hours)
 
 export const MIN_HOURS = 1

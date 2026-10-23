@@ -16,7 +16,8 @@ import { AuthGate } from '../auth/AuthGate'
 import { useAuth } from '../auth/context'
 import { site } from '../content/site'
 import { callLink, friendlyWhen, whatsappLink } from '../lib/contact'
-import { cancelBooking, watchMyBookings, type Booking, type Stored } from '../lib/db'
+import { RatingBar } from '../components/RatingBar'
+import { cancelBooking, rateSaathi, watchMyBookings, type Booking, type Stored } from '../lib/db'
 import { formatRupees } from '../lib/finance'
 import { hoursLabel } from '../lib/pricing'
 
@@ -193,37 +194,48 @@ function CurrentBooking({ row }: { row: Stored<Booking> }) {
 function PastBooking({ row }: { row: Stored<Booking> }) {
   const done = row.status === 'completed'
   return (
-    <li className="flex min-w-0 items-center gap-3 rounded-2xl bg-white/90 p-4 ring-1 ring-gold/25">
-      <span className={`grid size-10 shrink-0 place-items-center rounded-full ${done ? 'bg-emerald-100 text-emerald-800' : 'bg-wine/10 text-ink-muted'}`}>
-        {done ? <Check aria-hidden className="size-5" strokeWidth={2.5} /> : <XCircle aria-hidden className="size-5" />}
-        <span className="sr-only">{done ? 'Completed' : 'Cancelled'}</span>
-      </span>
-      <div className="min-w-0 grow">
-        <p className="truncate font-semibold">{row.serviceName ?? 'Saathi visit'}</p>
-        <p className="truncate text-sm text-ink-muted">
-          {when(row.completedAt ?? row.cancelledAt ?? row.scheduledAt ?? row.createdAt)}
-          {row.assignedSaathiName && ` · ${row.assignedSaathiName}`}
-        </p>
-        {/* What the Saathi recorded as paid, so the family can spot a mistake and call us. */}
-        {row.collection && row.collection.method === 'membership' ? (
-          <p className="truncate text-sm font-medium">Free with your membership</p>
-        ) : (
-          row.collection && (
-            <p className="truncate text-sm font-medium">
-              You paid {formatRupees(row.collection.totalPaise)}
-              {row.collection.extraPaise > 0 && ` (incl. ${formatRupees(row.collection.extraPaise)} extra: ${row.collection.extraNote})`}
-            </p>
-          )
-        )}
+    <li className="grid gap-3 rounded-2xl bg-white/90 p-4 ring-1 ring-gold/25">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className={`grid size-10 shrink-0 place-items-center rounded-full ${done ? 'bg-emerald-100 text-emerald-800' : 'bg-wine/10 text-ink-muted'}`}>
+          {done ? <Check aria-hidden className="size-5" strokeWidth={2.5} /> : <XCircle aria-hidden className="size-5" />}
+          <span className="sr-only">{done ? 'Completed' : 'Cancelled'}</span>
+        </span>
+        <div className="min-w-0 grow">
+          <p className="truncate font-semibold">{row.serviceName ?? 'Saathi visit'}</p>
+          <p className="truncate text-sm text-ink-muted">
+            {when(row.completedAt ?? row.cancelledAt ?? row.scheduledAt ?? row.createdAt)}
+            {row.assignedSaathiName && ` · ${row.assignedSaathiName}`}
+          </p>
+          {/* What the Saathi recorded as paid, so the family can spot a mistake and call us. */}
+          {row.collection && row.collection.method === 'membership' ? (
+            <p className="truncate text-sm font-medium">Free with your membership</p>
+          ) : (
+            row.collection && (
+              <p className="truncate text-sm font-medium">
+                You paid {formatRupees(row.collection.totalPaise)}
+                {row.collection.extraPaise > 0 && ` (incl. ${formatRupees(row.collection.extraPaise)} extra: ${row.collection.extraNote})`}
+              </p>
+            )
+          )}
+        </div>
+        <Link
+          to={row.serviceId ? `/contact/${row.serviceId}` : '/contact'}
+          aria-label={`Book ${row.serviceName ?? 'this'} again`}
+          title="Book again"
+          className="grid size-12 shrink-0 place-items-center rounded-full bg-burgundy/10 text-burgundy transition-colors hover:bg-burgundy hover:text-blush"
+        >
+          <RotateCcw aria-hidden className="size-5" />
+        </Link>
       </div>
-      <Link
-        to={row.serviceId ? `/contact/${row.serviceId}` : '/contact'}
-        aria-label={`Book ${row.serviceName ?? 'this'} again`}
-        title="Book again"
-        className="grid size-12 shrink-0 place-items-center rounded-full bg-burgundy/10 text-burgundy transition-colors hover:bg-burgundy hover:text-blush"
-      >
-        <RotateCcw aria-hidden className="size-5" />
-      </Link>
+      {/* After a finished visit the family can rate the Saathi who came; the team sees it. */}
+      {done && row.assignedSaathiName && (
+        <RatingBar
+          tone="light"
+          title={`How was ${row.assignedSaathiName}?`}
+          given={row.saathiRating ? { rating: row.saathiRating, note: row.saathiRatingNote } : undefined}
+          onSend={(rating, note) => rateSaathi(row, rating, note)}
+        />
+      )}
     </li>
   )
 }
@@ -280,7 +292,7 @@ function Bookings() {
       {past.length > 0 && (
         <section aria-labelledby="past-heading" className="grid gap-3">
           <h2 id="past-heading" className="text-lg font-semibold">
-            Past
+            Past bookings
           </h2>
           <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {past.map((row) => (

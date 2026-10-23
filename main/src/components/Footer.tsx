@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import wordmark from '../assets/logo/wordmark.svg'
 import { policies, site } from '../content/site'
 import { EnquiryForm } from './EnquiryForm'
+import { ReviewForm } from './ReviewForm'
 
 const year = new Date().getFullYear()
 
@@ -52,6 +53,11 @@ export function Footer({ showEnquiry = true }: { showEnquiry?: boolean }) {
             </div>
           </section>
         )}
+
+        {/* A slim rating bar across the page, under Let's talk (or on its own where that is hidden). */}
+        <div className={showEnquiry ? 'mt-12' : ''}>
+          <ReviewForm />
+        </div>
 
         <div className="flex flex-col gap-x-8 gap-y-4 pt-12 text-sm nav:flex-row nav:items-center nav:justify-between">
           <ul className="flex flex-wrap gap-x-6 gap-y-2">

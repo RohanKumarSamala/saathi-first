@@ -1,4 +1,4 @@
-import { collection, doc, onSnapshot, serverTimestamp, setDoc, Timestamp, updateDoc } from 'firebase/firestore'
+import { collection, doc, onSnapshot, serverTimestamp, setDoc, Timestamp } from 'firebase/firestore'
 import { memberships, servicePlans } from '../content/site'
 import { monthKey } from './dates'
 import { database, type Stored } from './db'
@@ -60,6 +60,18 @@ export const covers = (membership: Membership, serviceId: string, date: Date) =>
 
 export const planOf = (planId: string) => memberships.find((plan) => plan.id === planId)
 
+/**
+ * The catalogue plan a saved membership belongs to today. Plans were renamed on 23 Oct 2026
+ * (Basic → Silver, Silver → Golden), so an older record maps to its new plan;
+ * the rules accept only current plans, so the admin's next change saves it under the new one.
+ */
+const renamedPlans: Record<string, string> = { 'basic-care': 'silver-care', 'silver-care': 'golden-care' }
+export function currentPlanOf(membership: Pick<Membership, 'planId' | 'visitsPerMonth'>) {
+  const plan = planOf(membership.planId)
+  if (plan && plan.visitsPerMonth === membership.visitsPerMonth) return plan
+  return planOf(renamedPlans[membership.planId] ?? '') ?? memberships[0]
+}
+
 /** The signed-in customer's membership, live; null when they have none. */
 export function watchMembership(uid: string, onData: (membership: Membership | null) => void, onError: (error: Error) => void) {
   return onSnapshot(
@@ -92,6 +104,7 @@ export function saveMembership(input: {
   until: Date
   note: string
   used?: Record<string, number>
+  status?: MembershipStatus
 }) {
   const plan = planOf(input.planId)
   if (!plan) throw new Error('Unknown membership plan.')
@@ -100,7 +113,7 @@ export function saveMembership(input: {
     planId: plan.id,
     planName: plan.name,
     visitsPerMonth: plan.visitsPerMonth,
-    status: 'active' satisfies MembershipStatus,
+    status: input.status ?? 'active',
     validFrom: Timestamp.fromDate(input.from),
     validUntil: Timestamp.fromDate(input.until),
     used: input.used ?? {},
@@ -109,14 +122,23 @@ export function saveMembership(input: {
   })
 }
 
-/** Admin: stop a membership (bookings already made stay booked). */
-export function setMembershipStatus(uid: string, status: MembershipStatus) {
-  return updateDoc(doc(database(), 'memberships', uid), { status, updatedAt: serverTimestamp() })
-}
-
-/** Admin: correct this month's count by hand, e.g. a visit given back after a phone call. */
-export function adjustUsed(uid: string, key: string, value: number) {
-  return updateDoc(doc(database(), 'memberships', uid), { [`used.${key}`]: Math.max(value, 0), updatedAt: serverTimestamp() })
+/**
+ * Admin: change one membership (stop or resume it, correct a month's count) by saving it whole,
+ * so a record from before the plans were renamed moves to its current plan at the same time.
+ */
+export function updateMembership(
+  membership: Membership,
+  changes: { status?: MembershipStatus; used?: Record<string, number> },
+) {
+  return saveMembership({
+    uid: membership.uid,
+    planId: currentPlanOf(membership).id,
+    from: membership.validFrom.toDate(),
+    until: membership.validUntil.toDate(),
+    note: membership.note ?? '',
+    used: changes.used ?? membership.used,
+    status: changes.status ?? membership.status,
+  })
 }
 
 /** The end of the day `months` calendar months after `from`, the usual validity of one purchase. */

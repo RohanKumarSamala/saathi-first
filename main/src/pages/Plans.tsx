@@ -20,7 +20,6 @@ import { ButtonLink } from '../components/Button'
 import { Img } from '../components/Img'
 import { PageHero } from '../components/PageHero'
 import {
-  individualServices,
   memberships,
   plans,
   premiumAddOns,
@@ -33,8 +32,8 @@ import type { ImageName } from '../lib/images'
 type TabId = 'monthly' | 'individual' | 'add-ons'
 
 const tabs: { id: TabId; label: string; icon: LucideIcon }[] = [
-  { id: 'monthly', label: 'Monthly Memberships', icon: CalendarDays },
   { id: 'individual', label: 'Individual Plans', icon: UserRound },
+  { id: 'monthly', label: 'Monthly Memberships', icon: CalendarDays },
   { id: 'add-ons', label: 'Premium Add-ons', icon: Sparkles },
 ]
 
@@ -118,7 +117,7 @@ function MonthlyMemberships() {
         Select a plan that fits your needs. All plans include our trusted support, trained staff and regular
         updates.
       </p>
-      <ul className="mt-10 grid gap-8 sm:grid-cols-2 nav:grid-cols-3">
+      <ul className="mx-auto mt-10 grid max-w-5xl gap-8 sm:grid-cols-2">
         {memberships.map((plan, index) => (
           <MembershipCard key={plan.id} plan={plan} index={index} />
         ))}
@@ -130,15 +129,11 @@ function MonthlyMemberships() {
 const planCardClass =
   'flex w-full flex-col rounded-card bg-white/85 p-8 shadow-card transition-transform duration-500 ease-out-soft hover:-translate-y-1.5 sm:w-[calc(50%-1rem)] nav:w-[calc((100%-4rem)/3)] nav:p-10'
 
-/** One-time services shown alongside the per-visit plans; booked by WhatsApp, not the booking form. */
-const extraIndividualIds = ['event-temple']
-
 /**
- * The per-visit plans (property monitoring and the hourly companion plans, booked online)
- * plus selected one-time services.
+ * The per-visit plans, all booked online: property monitoring, the hourly companion plans and
+ * the fixed plans for one service (Emergency Care, Event & Temple Visit Assistance).
  */
 function IndividualPlans() {
-  const extras = individualServices.filter((service) => extraIndividualIds.includes(service.id))
   return (
     <>
       <p className="text-eyebrow font-semibold text-rosewood">Pay per visit</p>
@@ -166,42 +161,12 @@ function IndividualPlans() {
               ))}
             </ul>
             <ButtonLink
-              to={plan.hours ? `/contact?plan=${plan.id}` : '/contact/property-monitoring'}
+              to={plan.onlyFor ? `/contact/${plan.onlyFor}` : plan.hours ? `/contact?plan=${plan.id}` : '/contact/property-monitoring'}
               variant="solid"
               className="mt-auto"
             >
               Choose plan
             </ButtonLink>
-          </li>
-        ))}
-        {extras.map((service) => (
-          <li key={service.id} className={planCardClass}>
-            <h3 className="text-eyebrow font-semibold text-rosewood">{service.name}</h3>
-            <p className="mt-5 flex flex-wrap items-baseline gap-x-3">
-              <span className="text-5xl font-light tracking-tight text-burgundy">{service.price}</span>
-              <span className="font-medium text-ink-muted">/ {service.unit}</span>
-            </p>
-            <p className="mt-4 text-ink-muted">{service.description}</p>
-            <div aria-hidden className="divider-left my-7 text-wine/60" />
-            <ul className="mb-9 grid gap-3">
-              {service.points.map((point) => (
-                <li key={point} className="flex gap-3 font-medium">
-                  <Check aria-hidden className="mt-0.5 size-5 shrink-0 text-rosewood" />
-                  {point}
-                </li>
-              ))}
-            </ul>
-            <a
-              href={whatsappLink(
-                site.phoneDisplay,
-                `Hello Saathi First, I would like to book ${service.name} (${service.price} / ${service.unit}).`,
-              )}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-auto inline-flex min-h-12 items-center justify-center rounded-pill bg-burgundy px-8 font-semibold text-blush shadow-[0_10px_24px_-12px_rgb(107_30_46/0.9)] transition-[transform,background-color] duration-300 ease-out-soft hover:-translate-y-0.5 hover:bg-wine"
-            >
-              Choose plan
-            </a>
           </li>
         ))}
       </ul>
@@ -265,7 +230,7 @@ function PremiumAddOns() {
 export default function Plans() {
   const [params] = useSearchParams()
   const requested = params.get('tab')
-  const [active, setActive] = useState<TabId>(isTab(requested) ? requested : 'monthly')
+  const [active, setActive] = useState<TabId>(isTab(requested) ? requested : 'individual')
   const baseId = useId()
 
   // A link can open a tab (?tab=individual). Switching tabs rewrites the address in place

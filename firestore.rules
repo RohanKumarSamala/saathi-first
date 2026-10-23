@@ -74,33 +74,34 @@ service cloud.firestore {
 
     // Mirrors `plans` in main/src/content/site.ts. Change both together, then run npm run test:rules.
     function planHours() {
-      return {'quick': 2, 'care': 4, 'day': 8, 'extended': 12};
+      return {'quick': 2, 'care': 4, 'day': 8, 'extended': 12, 'emergency': 2, 'event-temple': 4};
     }
     function planNames() {
       return {'property': 'Property Monitoring', 'quick': 'Quick Companion', 'care': 'Care Companion',
-              'day': 'Day Companion', 'extended': 'Extended Companion'};
+              'day': 'Day Companion', 'extended': 'Extended Companion', 'emergency': 'Emergency Care',
+              'event-temple': 'Event & Temple Visit Assistance'};
     }
     function planPrices() {
-      return {'property': '₹99 / per visit', 'quick': '₹249 / up to 2 hrs', 'care': '₹499 / up to 4 hrs',
-              'day': '₹999 / up to 8 hrs', 'extended': '₹1,299 / up to 12 hrs'};
+      return {'property': '₹199 / per visit', 'quick': '₹399 / up to 2 hrs', 'care': '₹699 / up to 4 hrs',
+              'day': '₹999 / up to 8 hrs', 'extended': '₹1,299 / up to 12 hrs', 'emergency': '₹999 / up to 2 hrs',
+              'event-temple': '₹499 / up to 4 hrs'};
     }
 
     // What each plan bills, in paise (₹1 = 100). Mirrors planPaise in main/src/lib/finance.ts.
     function planPaise() {
-      return {'property': 9900, 'quick': 24900, 'care': 49900, 'day': 99900, 'extended': 129900};
+      return {'property': 19900, 'quick': 39900, 'care': 69900, 'day': 99900, 'extended': 129900, 'emergency': 99900, 'event-temple': 49900};
     }
 
     // ---------- Memberships ----------
 
     // Mirrors `memberships` (visitsPerMonth) and `servicePlans` in main/src/content/site.ts.
     function membershipVisits() {
-      return {'basic-care': 4, 'silver-care': 8, 'premium-care': 16};
+      return {'silver-care': 4, 'golden-care': 8};
     }
     function membershipServices() {
       return {
-        'basic-care': ['elder-companionship'],
-        'silver-care': ['hospital-assistance', 'banking-assistance'],
-        'premium-care': ['elder-companionship', 'hospital-assistance', 'transportation-assistance']
+        'silver-care': ['elder-companionship'],
+        'golden-care': ['hospital-assistance', 'banking-assistance']
       };
     }
 
@@ -179,15 +180,19 @@ service cloud.firestore {
         && getAfter(membershipPath(request.auth.uid)).data.get('lastBookingId', '') == bookingId;
     }
 
-    // Property Monitoring is one visit with no hours; every other service is booked by the hour
-    // on a companion plan that covers those hours. Name and price must be the catalogue's own,
-    // so a booking can never carry a made-up price.
+    // Property Monitoring is one visit with no hours; Emergency Support is always the 2-hour
+    // Emergency Care plan, and Event & Temple Visit Assistance its own 4-hour plan; every other
+    // service is booked by the hour on a companion plan that covers those hours. Name and price
+    // must be the catalogue's own, so a booking can never carry a made-up price.
     function validPlan(data) {
       return data.planName == planNames().get(data.planId, '')
         && data.planPrice == planPrices().get(data.planId, '')
         && (
           (data.serviceId == 'property-monitoring' && data.planId == 'property' && data.hours == null)
-          || (data.serviceId != 'property-monitoring' && data.planId in planHours()
+          || (data.serviceId == 'emergency-support' && data.planId == 'emergency' && data.hours == 2)
+          || (data.serviceId == 'event-temple' && data.planId == 'event-temple' && data.hours == 4)
+          || (!(data.serviceId in ['property-monitoring', 'emergency-support', 'event-temple'])
+              && data.planId in planHours() && !(data.planId in ['emergency', 'event-temple'])
               && data.hours is int && data.hours >= 1 && data.hours <= planHours()[data.planId])
         );
     }
@@ -382,6 +387,38 @@ service cloud.firestore {
         && data.cancelledBy == 'customer';
     }
 
+    // After a completed visit, the customer may rate its Saathi once (1 to 5 stars and a short
+    // note); a rating cannot be changed afterwards. Nothing else on the booking moves.
+    function customerRatesSaathi() {
+      let data = request.resource.data;
+      return resource.data.uid == request.auth.uid
+        && resource.data.status == 'completed'
+        && !('saathiRating' in resource.data)
+        && data.diff(resource.data).affectedKeys().hasOnly(['saathiRating', 'saathiRatingNote', 'saathiRatedAt'])
+        && data.saathiRating is int && data.saathiRating >= 1 && data.saathiRating <= 5
+        && text(data.get('saathiRatingNote', ''), 0, 500)
+        && data.saathiRatedAt == request.time;
+    }
+
+    // The saathiRatings copy of a rating: it must repeat what the booking holds after this write.
+    function validSaathiRating(bookingId, data) {
+      let booking = getAfter(/databases/$(database)/documents/bookings/$(bookingId)).data;
+      return data.keys().hasOnly(['bookingId', 'saathiId', 'saathiName', 'uid', 'customerName', 'serviceName',
+                                  'rating', 'note', 'createdAt'])
+        && data.bookingId == bookingId
+        && booking.uid == request.auth.uid
+        && data.uid == request.auth.uid
+        && booking.status == 'completed'
+        && data.saathiId == booking.get('assignedSaathiId', '')
+        && data.saathiName == booking.get('assignedSaathiName', '')
+        && data.customerName == booking.name
+        && data.serviceName == booking.get('serviceName', '')
+        && data.rating == booking.get('saathiRating', 0)
+        && data.note == booking.get('saathiRatingNote', '')
+        && booking.get('saathiRatedAt', null) == request.time
+        && data.createdAt == request.time;
+    }
+
     // The Saathi assigned to a visit marks it started when they arrive.
     function saathiStartsBooking() {
       let data = request.resource.data;
@@ -494,6 +531,7 @@ service cloud.firestore {
         || (isSaathi() && resource.data.assignedSaathiId == mySaathiId());
       allow update: if (isAdmin() && adminUpdatesBooking())
         || (signedIn() && customerCancelsBooking())
+        || (signedIn() && customerRatesSaathi())
         || (isSaathi() && saathiStartsBooking())
         || (isSaathi() && saathiCompletesBooking());
       allow delete: if false;
@@ -523,6 +561,15 @@ service cloud.firestore {
         || (signedIn() && customerUsesVisit(uid))
         || (signedIn() && customerReturnsVisit(uid));
       allow delete: if false;
+    }
+
+    // Every rating of a Saathi, one per completed visit at saathiRatings/{booking id}. Written only
+    // together with the same rating on the booking (customerRatesSaathi checks who and when), so
+    // the two always match. Admins read them all; a Saathi reads their own.
+    match /saathiRatings/{bookingId} {
+      allow read: if isAdmin() || (isSaathi() && resource.data.saathiId == mySaathiId());
+      allow create: if signedIn() && validSaathiRating(bookingId, request.resource.data);
+      allow update, delete: if false;
     }
 
     // Logins that may use the Saathi website, created by admins.

@@ -5,6 +5,7 @@ import {
   Car,
   ChevronRight,
   Crown,
+  Flower2,
   HeartHandshake,
   Hospital,
   House,
@@ -16,11 +17,11 @@ import {
 import { useState } from 'react'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import logoIcon from '../assets/logo/icon-dark.svg'
-import { services, site, type Service } from '../content/site'
+import { bookableServices, site, type Service } from '../content/site'
 import { useMembershipState } from '../hooks/useMembership'
 import { useSaathis } from '../hooks/useSaathis'
 import { monthName, servicesCoveredBy, visitsLeft } from '../lib/membership'
-import { companionPlans, isPerVisitService, priceLabel, propertyPlan } from '../lib/pricing'
+import { companionPlans, fixedPlanFor, isPerVisitService, priceLabel, propertyPlan } from '../lib/pricing'
 import { BookingWizard } from './booking/BookingWizard'
 import NotFound from './NotFound'
 
@@ -30,12 +31,16 @@ const serviceIcons: Record<string, LucideIcon> = {
   'banking-assistance': Landmark,
   'transportation-assistance': Car,
   'creche-services': Baby,
+  'event-temple': Flower2,
   'emergency-support': Ambulance,
   'property-monitoring': House,
 }
 
-const fromPrice = (service: Service) =>
-  isPerVisitService(service.id) ? priceLabel(propertyPlan) : `from ${companionPlans[0]?.price ?? ''}`
+const fromPrice = (service: Service) => {
+  if (isPerVisitService(service.id)) return priceLabel(propertyPlan)
+  const fixed = fixedPlanFor(service.id)
+  return fixed ? priceLabel(fixed) : `from ${companionPlans[0]?.price ?? ''}`
+}
 
 function ServiceIcon({ service, large = false }: { service: Service; large?: boolean }) {
   const Icon = serviceIcons[service.id] ?? HeartHandshake
@@ -104,7 +109,7 @@ function Booking({ service }: { service: Service }) {
 export default function Contact() {
   const { serviceId } = useParams()
   const { search } = useLocation()
-  const service = services.find((item) => item.id === serviceId)
+  const service = bookableServices.find((item) => item.id === serviceId)
 
   if (serviceId && !service) return <NotFound />
   if (service) return <Booking key={service.id} service={service} />
@@ -122,7 +127,7 @@ function ServiceList({ search }: { search: string }) {
   const memberView = params.get('membership') === '1'
   const active = membership && membership.status === 'active' && membership.validUntil.toMillis() > now.getTime() ? membership : null
   const covered = active ? servicesCoveredBy(active.planId) : []
-  const shown = memberView && active ? services.filter((item) => covered.includes(item.id)) : services
+  const shown = memberView && active ? bookableServices.filter((item) => covered.includes(item.id)) : bookableServices
   // Links into a service keep other parameters (such as a chosen plan), but not the list filter.
   const forward = new URLSearchParams(search)
   forward.delete('membership')

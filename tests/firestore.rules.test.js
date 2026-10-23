@@ -53,7 +53,7 @@ const booking = (uid, overrides = {}) => ({
   phone: '98765 43210',
   planId: 'care',
   planName: 'Care Companion',
-  planPrice: '₹499 / up to 4 hrs',
+  planPrice: '₹699 / up to 4 hrs',
   hours: 3,
   preferredStart: istSlot(2),
   location: { lat: 17.385, lng: 78.4867, accuracy: 20 },
@@ -152,10 +152,27 @@ describe('bookings: who may create', () => {
     await assertSucceeds(book(alice(), booking('alice', { preferredStart: istSlot(2, 7, 0) })))
     await assertSucceeds(book(alice(), booking('alice', { preferredStart: istSlot(2, 20, 0) }))) // 3 hours, ends 11 pm
     await assertFails(book(alice(), booking('alice', { preferredStart: istSlot(2, 6, 30) })))
-    const property = { planId: 'property', planName: 'Property Monitoring', planPrice: '₹99 / per visit', hours: null,
+    const property = { planId: 'property', planName: 'Property Monitoring', planPrice: '₹199 / per visit', hours: null,
       serviceId: 'property-monitoring', serviceName: 'Property Monitoring' }
     await assertSucceeds(book(alice(), booking('alice', { ...property, preferredStart: istSlot(2, 20, 0) })))
     await assertFails(book(alice(), booking('alice', { ...property, preferredStart: istSlot(2, 20, 30) })))
+  })
+  test('Emergency Support is booked only on the 2-hour Emergency Care plan', async () => {
+    const alice = () => db('alice', VERIFIED)
+    const emergency = { planId: 'emergency', planName: 'Emergency Care', planPrice: '₹999 / up to 2 hrs', hours: 2,
+      serviceId: 'emergency-support', serviceName: 'Emergency Support' }
+    await assertSucceeds(book(alice(), booking('alice', emergency)))
+    await assertFails(book(alice(), booking('alice', { ...emergency, hours: 1 })))
+    await assertFails(book(alice(), booking('alice', { ...emergency, planId: 'quick', planName: 'Quick Companion', planPrice: '₹399 / up to 2 hrs' })))
+    await assertFails(book(alice(), booking('alice', { planId: 'emergency', planName: 'Emergency Care', planPrice: '₹999 / up to 2 hrs', hours: 2 })))
+  })
+  test('Event & Temple Visit Assistance is booked only on its own 4-hour plan', async () => {
+    const alice = () => db('alice', VERIFIED)
+    const temple = { planId: 'event-temple', planName: 'Event & Temple Visit Assistance', planPrice: '₹499 / up to 4 hrs', hours: 4,
+      serviceId: 'event-temple', serviceName: 'Event & Temple Visit Assistance' }
+    await assertSucceeds(book(alice(), booking('alice', temple)))
+    await assertFails(book(alice(), booking('alice', { ...temple, hours: 2 })))
+    await assertFails(book(alice(), booking('alice', { planId: 'event-temple', planName: 'Event & Temple Visit Assistance', planPrice: '₹499 / up to 4 hrs', hours: 4 })))
   })
   test('a booking without a location (typed address only) is accepted', async () => {
     await assertSucceeds(book(db('alice', VERIFIED), booking('alice', { location: null })))
@@ -193,7 +210,7 @@ describe('bookings: who may create', () => {
           serviceName: 'Property Monitoring',
           planId: 'property',
           planName: 'Property Monitoring',
-          planPrice: '₹99 / per visit',
+          planPrice: '₹199 / per visit',
           hours: null,
         }),
       ),
@@ -278,11 +295,11 @@ describe('bookings: what may be written', () => {
     'book more than a whole day': { hours: 13, planId: 'extended', planName: 'Extended Companion', planPrice: '₹1,299 / up to 12 hrs' },
     'use an unknown plan': { planId: 'vip', planName: 'VIP', planPrice: '₹0' },
     'put a companion service on the per-visit property plan': {
-      planId: 'property', planName: 'Property Monitoring', planPrice: '₹99 / per visit', hours: null,
+      planId: 'property', planName: 'Property Monitoring', planPrice: '₹199 / per visit', hours: null,
     },
     'book hours for a property visit': {
       serviceId: 'property-monitoring', serviceName: 'Property Monitoring',
-      planId: 'care', planName: 'Care Companion', planPrice: '₹499 / up to 4 hrs', hours: 3,
+      planId: 'care', planName: 'Care Companion', planPrice: '₹699 / up to 4 hrs', hours: 3,
     },
     'book a visit in the past': { preferredStart: inDays(-1) },
     'book a visit a year ahead': { preferredStart: inDays(365) },
@@ -334,15 +351,15 @@ describe('bookings: reading and changing', () => {
   })
 })
 
-// What a Saathi records for a Care Companion visit (₹499) at the default 20% company share.
+// What a Saathi records for a Care Companion visit (₹699) at the default 20% company share.
 const paid = (overrides = {}) => ({
-  billPaise: 49900,
+  billPaise: 69900,
   extraPaise: 0,
-  totalPaise: 49900,
+  totalPaise: 69900,
   method: 'upi',
   commissionPercent: 20,
-  companySharePaise: 9980,
-  saathiSharePaise: 39920,
+  companySharePaise: 13980,
+  saathiSharePaise: 55920,
   ...overrides,
 })
 
@@ -680,19 +697,19 @@ describe('Saathi website: visits and collections', () => {
   test('a Saathi can complete straight from assigned, and record an extra charge with a reason', async () => {
     await assertSucceeds(
       updateDoc(doc(ravi(), 'bookings/b1'), complete({
-        collection: paid({ extraPaise: 10000, extraNote: 'One extra hour', totalPaise: 59900, companySharePaise: 11980, saathiSharePaise: 47920, method: 'cash' }),
+        collection: paid({ extraPaise: 10000, extraNote: 'One extra hour', totalPaise: 79900, companySharePaise: 15980, saathiSharePaise: 63920, method: 'cash' }),
       })),
     )
   })
   const cheats = {
     'record a lower bill than the plan price': paid({ billPaise: 100, totalPaise: 100, companySharePaise: 20, saathiSharePaise: 80 }),
     'lower the company share': paid({ companySharePaise: 100, saathiSharePaise: 49800 }),
-    'use a lower percentage': paid({ commissionPercent: 5, companySharePaise: 2495, saathiSharePaise: 47405 }),
-    'make the split not add up': paid({ saathiSharePaise: 49900 }),
+    'use a lower percentage': paid({ commissionPercent: 5, companySharePaise: 3495, saathiSharePaise: 66405 }),
+    'make the split not add up': paid({ saathiSharePaise: 69900 }),
     'make the total not add up': paid({ totalPaise: 10000, companySharePaise: 2000, saathiSharePaise: 8000 }),
     'add an extra charge with no reason': paid({ extraPaise: 5000, totalPaise: 54900, companySharePaise: 10980, saathiSharePaise: 43920 }),
     'record a negative extra': paid({ extraPaise: -5000, extraNote: 'discount', totalPaise: 44900, companySharePaise: 8980, saathiSharePaise: 35920 }),
-    'use fractional paise': paid({ companySharePaise: 9980.5, saathiSharePaise: 39919.5 }),
+    'use fractional paise': paid({ companySharePaise: 13980.5, saathiSharePaise: 55919.5 }),
     'use an unknown payment method': paid({ method: 'crypto' }),
     'add unknown fields': paid({ settled: true }),
   }
@@ -703,14 +720,14 @@ describe('Saathi website: visits and collections', () => {
   }
   test('rounding: the company share rounds to the nearest paisa', async () => {
     await seed('config/finance', { commissionPercent: 33, updatedAt: Timestamp.now() })
-    await seed('bookings/b3', { ...assignedTo('s1'), planId: 'quick', planName: 'Quick Companion', planPrice: '₹249 / up to 2 hrs', hours: 2 })
+    await seed('bookings/b3', { ...assignedTo('s1'), planId: 'quick', planName: 'Quick Companion', planPrice: '₹399 / up to 2 hrs', hours: 2 })
     const extra = { extraPaise: 1, extraNote: 'one paisa extra' }
-    // 24901 paise at 33% = 8217.33 paise, so the share is 8217, not 8218.
+    // 39901 paise at 33% = 13167.33 paise, so the share is 13167, not 13168.
     await assertFails(updateDoc(doc(ravi(), 'bookings/b3'), complete({
-      collection: paid({ billPaise: 24900, ...extra, totalPaise: 24901, commissionPercent: 33, companySharePaise: 8218, saathiSharePaise: 16683 }),
+      collection: paid({ billPaise: 39900, ...extra, totalPaise: 39901, commissionPercent: 33, companySharePaise: 13168, saathiSharePaise: 26733 }),
     })))
     await assertSucceeds(updateDoc(doc(ravi(), 'bookings/b3'), complete({
-      collection: paid({ billPaise: 24900, ...extra, totalPaise: 24901, commissionPercent: 33, companySharePaise: 8217, saathiSharePaise: 16684 }),
+      collection: paid({ billPaise: 39900, ...extra, totalPaise: 39901, commissionPercent: 33, companySharePaise: 13167, saathiSharePaise: 26734 }),
     })))
   })
   test('the percentage must be the one the admin set', async () => {
@@ -782,6 +799,55 @@ describe('company share settings and payments', () => {
   })
 })
 
+describe('rating the Saathi', () => {
+  const visit = (status) => ({
+    ...booking('alice', { status, createdAt: Timestamp.now() }),
+    assignedSaathiId: 's1', assignedSaathiName: 'Ravi K.', assignedSaathiPhone: '9123456780', scheduledAt: inDays(1),
+  })
+  const rate = (store, overrides = {}) =>
+    updateDoc(doc(store, 'bookings/b1'), { saathiRating: 5, saathiRatingNote: 'Very caring', saathiRatedAt: serverTimestamp(), ...overrides })
+  // What the site writes: the booking's fields and the saathiRatings copy, in one batch.
+  const rateBoth = (store, copy = {}) => {
+    const batch = writeBatch(store)
+    batch.update(doc(store, 'bookings/b1'), { saathiRating: 4, saathiRatingNote: 'Kind', saathiRatedAt: serverTimestamp() })
+    batch.set(doc(store, 'saathiRatings/b1'), {
+      bookingId: 'b1', saathiId: 's1', saathiName: 'Ravi K.', uid: 'alice', customerName: 'Priya Sharma',
+      serviceName: 'Hospital Assistance', rating: 4, note: 'Kind', createdAt: serverTimestamp(), ...copy,
+    })
+    return batch.commit()
+  }
+  test('each rating is also kept in saathiRatings, matching the booking', async () => {
+    await seed('bookings/b1', visit('completed'))
+    await assertSucceeds(rateBoth(db('alice', VERIFIED)))
+    await assertSucceeds(getDoc(doc(db('admin1', VERIFIED), 'saathiRatings/b1')))
+    await assertFails(getDoc(doc(db('alice', VERIFIED), 'saathiRatings/b1')))
+    // Already rated: neither copy can be changed.
+    await assertFails(rateBoth(db('alice', VERIFIED)))
+    await seed('bookings/b1', visit('completed'))
+    await assertFails(rateBoth(db('alice', VERIFIED), { rating: 5 }))
+    await assertFails(rateBoth(db('alice', VERIFIED), { saathiId: 's2' }))
+    await assertFails(setDoc(doc(db('alice', VERIFIED), 'saathiRatings/b1'), {
+      bookingId: 'b1', saathiId: 's1', saathiName: 'Ravi K.', uid: 'alice', customerName: 'Priya Sharma',
+      serviceName: 'Hospital Assistance', rating: 1, note: '', createdAt: serverTimestamp(),
+    }))
+  })
+  test('the customer can rate the Saathi once after a completed visit, and not change it', async () => {
+    await seed('bookings/b1', visit('completed'))
+    await assertSucceeds(rate(db('alice', VERIFIED)))
+    await assertFails(rate(db('alice', VERIFIED), { saathiRating: 3, saathiRatingNote: '' }))
+  })
+  test('only the customer, only once completed, only 1 to 5 whole stars, nothing else', async () => {
+    await seed('bookings/b1', visit('assigned'))
+    await assertFails(rate(db('alice', VERIFIED)))
+    await seed('bookings/b1', visit('completed'))
+    await assertFails(rate(db('bob', VERIFIED)))
+    for (const saathiRating of [0, 6, 4.5]) await assertFails(rate(db('alice', VERIFIED), { saathiRating }))
+    await assertFails(rate(db('alice', VERIFIED), { saathiRatingNote: 'x'.repeat(501) }))
+    await assertFails(rate(db('alice', VERIFIED), { saathiRatedAt: Timestamp.now() }))
+    await assertFails(rate(db('alice', VERIFIED), { address: 'Somewhere else' }))
+  })
+})
+
 describe('memberships', () => {
   // The month key the rules compute from a visit's start (UTC), e.g. "2026-10".
   const keyOf = (timestamp) => {
@@ -792,8 +858,8 @@ describe('memberships', () => {
   const key = keyOf(visitAt)
   const membership = (overrides = {}) => ({
     uid: 'alice',
-    planId: 'silver-care',
-    planName: 'Silver Care',
+    planId: 'golden-care',
+    planName: 'Golden Care',
     visitsPerMonth: 8,
     status: 'active',
     validFrom: inDays(-1),
@@ -807,7 +873,7 @@ describe('memberships', () => {
     booking('alice', {
       planId: 'quick',
       planName: 'Quick Companion',
-      planPrice: '₹249 / up to 2 hrs',
+      planPrice: '₹399 / up to 2 hrs',
       hours: 2,
       preferredStart: visitAt,
       paidBy: 'membership',
@@ -832,7 +898,7 @@ describe('memberships', () => {
   test('only admins switch a membership on, with the catalogue’s plan and visit count', async () => {
     await assertFails(setDoc(doc(db('alice', VERIFIED), 'memberships/alice'), membership()))
     await assertFails(setDoc(doc(db('admin1', VERIFIED), 'memberships/alice'), membership({ visitsPerMonth: 99 })))
-    await assertFails(setDoc(doc(db('admin1', VERIFIED), 'memberships/alice'), membership({ planId: 'gold-care' })))
+    await assertFails(setDoc(doc(db('admin1', VERIFIED), 'memberships/alice'), membership({ planId: 'unknown-care' })))
     await assertFails(setDoc(doc(db('admin1', VERIFIED), 'memberships/alice'), membership({ uid: 'bob' })))
     await assertSucceeds(setDoc(doc(db('admin1', VERIFIED), 'memberships/alice'), membership()))
   })
@@ -864,7 +930,7 @@ describe('memberships', () => {
     await seedMembership()
     await assertFails(bookMember(db('alice', VERIFIED), memberVisit({ serviceId: 'elder-companionship', serviceName: 'Elder Companionship' })))
     await assertFails(
-      bookMember(db('alice', VERIFIED), memberVisit({ planId: 'care', planName: 'Care Companion', planPrice: '₹499 / up to 4 hrs', hours: 4 })),
+      bookMember(db('alice', VERIFIED), memberVisit({ planId: 'care', planName: 'Care Companion', planPrice: '₹699 / up to 4 hrs', hours: 4 })),
     )
   })
   test('customers cannot change their membership except through a booking', async () => {
@@ -899,18 +965,18 @@ describe('memberships', () => {
       assignedAt: Timestamp.now(),
       status: 'assigned',
     })
-    const membershipCollection = { billPaise: 24900, extraPaise: 0, totalPaise: 24900, method: 'membership', commissionPercent: 20, companySharePaise: -19920, saathiSharePaise: 19920 }
+    const membershipCollection = { billPaise: 39900, extraPaise: 0, totalPaise: 39900, method: 'membership', commissionPercent: 20, companySharePaise: -31920, saathiSharePaise: 31920 }
     const complete = (collectionData) => updateDoc(doc(db('ravi', PHONE), 'bookings/m1'), { status: 'completed', completedAt: serverTimestamp(), collection: collectionData })
     await assertFails(complete({ ...membershipCollection, method: 'cash', companySharePaise: 4980 }))
     await assertFails(complete({ ...membershipCollection, companySharePaise: 4980 }))
-    await assertFails(complete({ ...membershipCollection, extraPaise: 5000, extraNote: 'Extra hour', totalPaise: 29900 }))
+    await assertFails(complete({ ...membershipCollection, extraPaise: 5000, extraNote: 'Extra hour', totalPaise: 44900 }))
     await assertSucceeds(complete(membershipCollection))
   })
   test('a paid visit cannot be recorded as a membership visit', async () => {
     await seed('applications/s1', { ...application('ravi', { status: 'verified' }), createdAt: Timestamp.now() })
     await seed('staff/ravi', { applicationId: 's1', name: 'Ravi Kumar', phone: '9123456780', active: true, createdAt: Timestamp.now() })
     await seed('bookings/p1', {
-      ...booking('alice', { planId: 'quick', planName: 'Quick Companion', planPrice: '₹249 / up to 2 hrs', hours: 2 }),
+      ...booking('alice', { planId: 'quick', planName: 'Quick Companion', planPrice: '₹399 / up to 2 hrs', hours: 2 }),
       createdAt: Timestamp.now(),
       assignedSaathiId: 's1',
       assignedSaathiName: 'Ravi K.',
@@ -923,7 +989,7 @@ describe('memberships', () => {
       updateDoc(doc(db('ravi', PHONE), 'bookings/p1'), {
         status: 'completed',
         completedAt: serverTimestamp(),
-        collection: { billPaise: 24900, extraPaise: 0, totalPaise: 24900, method: 'membership', commissionPercent: 20, companySharePaise: -19920, saathiSharePaise: 19920 },
+        collection: { billPaise: 39900, extraPaise: 0, totalPaise: 39900, method: 'membership', commissionPercent: 20, companySharePaise: -31920, saathiSharePaise: 31920 },
       }),
     )
   })

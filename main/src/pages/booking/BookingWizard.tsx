@@ -32,6 +32,7 @@ import {
 import { isValidIndianMobile } from '../../lib/enquiry'
 import {
   companionPlans,
+  fixedPlanFor,
   hoursLabel,
   isPerVisitService,
   MAX_HOURS,
@@ -161,10 +162,12 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
   const { user } = useAuth()
   const [params] = useSearchParams()
   const perVisit = isPerVisitService(service.id)
+  // Emergency Support has one plan (Emergency Care): its hours are set, so there is no "How long".
+  const fixedPlan = fixedPlanFor(service.id)
   const [index, setIndex] = useState(0)
 
   // A plan picked on the Plans page arrives as ?plan= and sets the starting hours.
-  const fromPlans = plans.find((plan) => plan.id === params.get('plan'))
+  const fromPlans = plans.find((plan) => plan.id === params.get('plan') && !plan.onlyFor)
   const [hours, setHours] = useState(fromPlans?.hours ?? companionPlans[0]?.hours ?? MIN_HOURS)
 
   // A member whose plan covers this service, with free visits left (this month, or in a later
@@ -196,11 +199,16 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
   // the first step, so signing in later never reshuffles the steps under them.
   if (payWith === null && memberCanUse && index === 0) setPayWith('membership')
   const usingMembership = memberCanUse && payWith === 'membership'
-  // A membership visit is always 2 hours, so it skips the "How long" step.
-  const stepIds: StepId[] = perVisit || usingMembership ? ['when', 'where', 'confirm'] : ['time', 'when', 'where', 'confirm']
+  // A membership visit is always 2 hours, and a fixed plan sets its own, so both skip "How long".
+  const stepIds: StepId[] =
+    perVisit || usingMembership || fixedPlan ? ['when', 'where', 'confirm'] : ['time', 'when', 'where', 'confirm']
   const step = stepIds[Math.min(index, stepIds.length - 1)]
-  const visitHours = usingMembership ? MEMBERSHIP_HOURS : hours
-  const plan = perVisit ? propertyPlan : usingMembership ? planForHours(MEMBERSHIP_HOURS) : planForHours(hours)
+  const visitHours = usingMembership ? MEMBERSHIP_HOURS : fixedPlan ? fixedPlan.hours : hours
+  const plan = perVisit
+    ? propertyPlan
+    : usingMembership
+      ? planForHours(MEMBERSHIP_HOURS)
+      : (fixedPlan ?? planForHours(hours))
 
   // India's date and time, wherever the visitor is: the calendar and times are Hyderabad's.
   const [now] = useState(() => indiaWallClock())
@@ -416,7 +424,7 @@ export function BookingWizard({ service, saathis }: { service: Service; saathis:
 
   const recap: { label: string; value: string; edit?: StepId }[] = [
     { label: 'Service', value: service.name },
-    { label: perVisit ? 'Visit' : 'How long', value: perVisit ? 'One visit' : hoursLabel(visitHours), edit: perVisit || usingMembership ? undefined : 'time' },
+    { label: perVisit ? 'Visit' : 'How long', value: perVisit ? 'One visit' : hoursLabel(visitHours), edit: perVisit || usingMembership || fixedPlan ? undefined : 'time' },
     { label: 'When', value: startAt ? friendlyWhen(startAt) : '', edit: 'when' },
     { label: 'Where', value: `${address}${location ? ' (location shared)' : ''}`, edit: 'where' },
     {

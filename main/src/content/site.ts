@@ -166,6 +166,25 @@ export const services: Service[] = [
   },
 ]
 
+/**
+ * Everything on the Book a Saathi page: the services above plus one-time visits booked online on
+ * their own plan (`onlyFor` in `plans`). These extras are not on the Our Services page.
+ */
+export const bookableServices: Service[] = [
+  ...services,
+  {
+    id: 'event-temple',
+    name: 'Event & Temple Visit Assistance',
+    summary: 'Accompany your loved ones to family functions, weddings and temple visits.',
+    heading: 'Accompany your loved ones to family functions, weddings and temple visits.',
+    paragraphs: ['Accompany your loved ones to family functions, weddings and temple visits.'],
+    points: ['Travel and entry assistance', 'Support with belongings', 'Companionship throughout'],
+    image: 'travel-bus',
+    imageAlt: 'A Saathi First companion travelling beside a smiling elderly woman',
+    imagePosition: '50% 30%',
+  },
+]
+
 export type Plan = {
   id: string
   name: string
@@ -181,6 +200,11 @@ export type Plan = {
   hours?: number
   /** Offered to customers as the "Whole day" option. */
   wholeDay?: boolean
+  /**
+   * The one plan for this service: booking it skips the "How long" step and uses this price and
+   * these hours (Emergency Care). Such plans are not among the hourly companion plans.
+   */
+  onlyFor?: string
 }
 
 const companionServices = [
@@ -189,14 +213,13 @@ const companionServices = [
   'Banking Assistance',
   'Transportation Assistance',
   'Creche Services',
-  'Emergency Support',
 ]
 
 export const plans: Plan[] = [
   {
     id: 'property',
     name: 'Property Monitoring',
-    price: '₹99',
+    price: '₹199',
     unit: 'per visit',
     description:
       'Regular property visits with basic inspection, photos and updates to keep you informed.',
@@ -209,7 +232,7 @@ export const plans: Plan[] = [
   {
     id: 'quick',
     name: 'Quick Companion',
-    price: '₹249',
+    price: '₹399',
     unit: 'up to 2 hrs',
     hours: 2,
     description: 'Ideal for quick and reliable support when you need it.',
@@ -218,7 +241,7 @@ export const plans: Plan[] = [
   {
     id: 'care',
     name: 'Care Companion',
-    price: '₹499',
+    price: '₹699',
     unit: 'up to 4 hrs',
     hours: 4,
     description: 'Reliable companionship and assistance for your essential needs.',
@@ -242,6 +265,30 @@ export const plans: Plan[] = [
     wholeDay: true,
     description: 'Personalised companionship and support for a full day.',
     includes: companionServices,
+  },
+  {
+    id: 'emergency',
+    name: 'Emergency Care',
+    price: '₹999',
+    unit: 'up to 2 hrs',
+    hours: 2,
+    onlyFor: 'emergency-support',
+    description: 'Prompt help from a Saathi when something unexpected happens.',
+    includes: [
+      'Emergency coordination',
+      'Hospital or doctor visit support',
+      'Updates to family and emergency contacts',
+    ],
+  },
+  {
+    id: 'event-temple',
+    name: 'Event & Temple Visit Assistance',
+    price: '₹499',
+    unit: 'up to 4 hrs',
+    hours: 4,
+    onlyFor: 'event-temple',
+    description: 'Accompany your loved ones to family functions, weddings and temple visits.',
+    includes: ['Travel and entry assistance', 'Support with belongings', 'Companionship throughout'],
   },
 ]
 
@@ -268,8 +315,8 @@ export type Membership = {
  */
 export const memberships: Membership[] = [
   {
-    id: 'basic-care',
-    name: 'Basic Care',
+    id: 'silver-care',
+    name: 'Silver Care',
     price: '₹1,499',
     description: 'For occasional companionship and everyday assistance.',
     visits: '4 visits per month',
@@ -287,8 +334,8 @@ export const memberships: Membership[] = [
     imagePosition: '62% 40%',
   },
   {
-    id: 'silver-care',
-    name: 'Silver Care',
+    id: 'golden-care',
+    name: 'Golden Care',
     price: '₹2,999',
     description: 'For regular support for elderly loved ones.',
     visits: '8 visits per month',
@@ -304,25 +351,6 @@ export const memberships: Membership[] = [
     image: 'banking',
     imageAlt: 'A Saathi First companion going through papers with an elderly man at a bank desk',
     imagePosition: '50% 40%',
-  },
-  {
-    id: 'premium-care',
-    name: 'Premium Care',
-    price: '₹5,999',
-    description: 'For families who need more frequent personal assistance.',
-    visits: '16 visits per month',
-    visitsPerMonth: 16,
-    hoursEach: 'Up to 2 hours each',
-    includes: [
-      'Companionship and daily errands',
-      'Transport coordination',
-      'Appointment assistance',
-      'Regular family progress reports',
-    ],
-    notIncluded: 'Personal medical care, nursing, specialist services',
-    image: 'transport',
-    imageAlt: 'A Saathi First companion helping an elderly woman out of a car',
-    imagePosition: '50% 35%',
   },
 ]
 
@@ -421,7 +449,7 @@ export const individualServices: IndividualService[] = [
     description: 'Accompany your loved ones to family functions, weddings and temple visits.',
     points: ['Travel and entry assistance', 'Support with belongings', 'Companionship throughout'],
     price: '₹499',
-    unit: 'outing',
+    unit: 'up to 4 hrs',
     image: 'travel-bus',
     imageAlt: 'A Saathi First companion travelling beside a smiling elderly woman',
     imagePosition: '50% 30%',
@@ -465,7 +493,7 @@ export const premiumAddOns: AddOn[] = [
     id: 'medicine-pickup',
     name: 'Medicine Pickup',
     description: 'Collect prescribed medicines and arrange refills with family approval.',
-    price: '₹149',
+    price: '₹199',
     unit: 'pickup',
   },
   {
@@ -498,25 +526,25 @@ export const servicePlans: Record<
   'hospital-assistance': {
     perVisit: allCompanionPlans,
     individual: [],
-    memberships: ['silver-care', 'premium-care'],
+    memberships: ['golden-care'],
     addOns: ['extra-hospital-visit', 'medicine-pickup', 'priority-booking'],
   },
   'elder-companionship': {
-    perVisit: allCompanionPlans,
-    individual: ['event-temple'],
-    memberships: ['basic-care', 'premium-care'],
+    perVisit: [...allCompanionPlans, 'event-temple'],
+    individual: [],
+    memberships: ['silver-care'],
     addOns: ['extended-companionship', 'special-event-assistance'],
   },
   'banking-assistance': {
     perVisit: allCompanionPlans,
     individual: [],
-    memberships: ['silver-care'],
+    memberships: ['golden-care'],
     addOns: ['priority-booking'],
   },
   'transportation-assistance': {
-    perVisit: allCompanionPlans,
-    individual: ['event-temple'],
-    memberships: ['premium-care'],
+    perVisit: [...allCompanionPlans, 'event-temple'],
+    individual: [],
+    memberships: [],
     addOns: ['special-transportation'],
   },
   'creche-services': {
@@ -526,7 +554,7 @@ export const servicePlans: Record<
     addOns: ['special-event-assistance'],
   },
   'emergency-support': {
-    perVisit: allCompanionPlans,
+    perVisit: ['emergency'],
     individual: [],
     memberships: [],
     addOns: ['medicine-pickup', 'priority-booking'],
@@ -577,7 +605,7 @@ export const comparison = {
     { label: 'Who shows up', value: 'An identity and background-verified Saathi' },
     { label: 'Preparation', value: 'Trained before the first assignment' },
     { label: 'Family updates', value: 'Informed at pickup, arrival and drop-off' },
-    { label: 'Pricing', value: 'Clear plans from ₹99 per visit' },
+    { label: 'Pricing', value: 'Clear plans from ₹199 per visit' },
     { label: 'Flexibility', value: 'Book from 2 hours to a full 12-hour day' },
     { label: 'Emergencies', value: 'Coordination with family and nearby hospitals' },
     { label: 'Experience', value: 'One team for hospital, bank, travel and home' },
@@ -622,7 +650,7 @@ export const faqs = [
   },
   {
     q: 'How much does it cost?',
-    a: 'Property Monitoring starts at ₹99 per visit. Companion plans are ₹249 for up to 2 hours, ₹499 for up to 4 hours, ₹999 for up to 8 hours and ₹1,299 for up to 12 hours.',
+    a: 'Property Monitoring starts at ₹199 per visit. Companion plans are ₹399 for up to 2 hours, ₹699 for up to 4 hours, ₹999 for up to 8 hours and ₹1,299 for up to 12 hours. Emergency Care is ₹999 for up to 2 hours.',
   },
   {
     q: 'Will my family be kept informed?',

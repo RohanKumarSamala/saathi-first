@@ -1,9 +1,7 @@
-import { Check, Crown, Hourglass, MapPin, MessageCircle, Phone, UserRoundCheck, X, XCircle } from 'lucide-react'
+import { Check, ChevronDown, Crown, Hourglass, MapPin, MessageCircle, Pencil, Phone, TriangleAlert, X, XCircle } from 'lucide-react'
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { Collapsible } from './Collapsible'
 import { services } from '../../main/src/content/site'
 import { callLink, friendlyWhen, whatsappLink } from '../../main/src/lib/contact'
-import { formatRupees } from '../../main/src/lib/finance'
 import { hoursLabel, planForHours } from '../../main/src/lib/pricing'
 import {
   approveMoreTime,
@@ -16,6 +14,8 @@ import {
   type Stored,
 } from '../../main/src/lib/db'
 import { isValidIndianMobile } from '../../main/src/lib/enquiry'
+import { formatRupees } from '../../main/src/lib/finance'
+import { tooManyUnpaid, unpaidVisits, type Accounts } from './accounts'
 
 /** "2026-10-18T10:30" in local time, the format a datetime-local input expects. */
 function toInputValue(date: Date) {
@@ -34,14 +34,19 @@ const mainAction =
  * Admin controls for one booking: assign a verified Saathi with a visit time and the
  * number the customer will WhatsApp. Starting and completing a visit happen only on the Saathi website.
  */
-export function BookingAssignment({ row, saathis, linked, children }: {
+export function BookingAssignment({ row, saathis, linked, accounts, children, more }: {
   row: Stored<Booking>
   saathis: Stored<Application>[]
   /** Saathis (application IDs) who can sign in to the Saathi website and see the visit. */
   linked: Set<string>
-  /** The booking's detail lines; shown in the card's fold below the assignment summary. */
+  /** Each Saathi's account, to flag those with too many visits unpaid. */
+  accounts: Accounts
+  /** The booking's main detail lines, always shown. */
   children: ReactNode
+  /** Further detail lines (payment, rating, message), behind Show more. */
+  more?: ReactNode
 }) {
+  const [showMore, setShowMore] = useState(false)
   // Saathis who offer this booking's service are listed first.
   const ordered = [...saathis].sort(
     (a, b) =>
@@ -70,6 +75,10 @@ export function BookingAssignment({ row, saathis, linked, children }: {
       setBusy(false)
     }
   }
+
+  const chosen = saathis.find((s) => s.id === saathiId)
+  const chosenAccount = accounts.get(saathiId)
+  const chosenBehind = tooManyUnpaid(chosenAccount)
 
   const chooseSaathi = (id: string) => {
     setSaathiId(id)
@@ -122,56 +131,37 @@ export function BookingAssignment({ row, saathis, linked, children }: {
 
   return (
     <>
-      {membershipVisit && (
-        <p role="note" className="flex items-start gap-2 rounded-xl bg-gold/25 px-3 py-2 text-sm font-semibold text-wine ring-1 ring-gold/50">
-          <Crown aria-hidden className="mt-0.5 size-4 shrink-0 text-burgundy" />
-          <span>
-            Membership visit: free for the customer. The Saathi must not collect any money; Saathi First pays their share.
-          </span>
-        </p>
-      )}
+      {/* The booking's main details, then slim one-line notes, then the rest behind Show more. */}
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5">{children}</div>
       {unreachable && (
-        <p role="status" className="rounded-xl bg-rosewood/15 px-3 py-2 text-sm font-medium text-wine">
-          {row.assignedSaathiName} cannot see this visit: no active Saathi website login. Give access under Saathis, or change
-          the Saathi.
+        <p role="status" className="-mt-1 flex items-start gap-1.5 text-xs font-semibold text-rosewood">
+          <TriangleAlert aria-hidden className="mt-px size-3.5 shrink-0" />
+          {row.assignedSaathiName} has no Saathi website login, so cannot see this visit. Give access under Saathis.
         </p>
       )}
-      <Collapsible>
-        {row.assignedSaathiName && (
-          <p className="flex items-start gap-2 rounded-xl bg-blush/70 px-3 py-2 text-sm">
-            <UserRoundCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-rosewood" />
-            <span className="sr-only">Assigned Saathi: </span>
-            <span>
-              <strong className="font-semibold">{row.assignedSaathiName}</strong> · {row.assignedSaathiPhone}
-              {row.scheduledAt && <span className="block text-ink-muted">{friendlyWhen(row.scheduledAt.toDate())}</span>}
-            </span>
-          </p>
-        )}
-
-        {row.extraHoursRequested && (row.status === 'assigned' || row.status === 'started') && (
-          <ExtraTimeRequest row={row} busy={busy} run={run} />
-        )}
-        {row.collection?.method === 'membership' && (
-          <p className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-            <strong className="font-semibold">Nothing collected (membership)</strong> · Saathi First owes the Saathi{' '}
-            {formatRupees(row.collection.saathiSharePaise)}
-          </p>
-        )}
-        {row.collection && row.collection.method !== 'membership' && (
-          <p className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-            <span className="sr-only">Collected: </span>
-            <strong className="font-semibold">{formatRupees(row.collection.totalPaise)}</strong> by{' '}
-            {row.collection.method === 'cash' ? 'cash' : 'UPI'} · company {formatRupees(row.collection.companySharePaise)} (
-            {row.collection.commissionPercent}%)
-            {row.collection.extraPaise > 0 && (
-              <span className="block text-emerald-800">
-                Includes {formatRupees(row.collection.extraPaise)} extra: {row.collection.extraNote}
-              </span>
-            )}
-          </p>
-        )}
-        {children}
-      </Collapsible>
+      {membershipVisit && active && (
+        <p role="note" className="-mt-1 flex items-start gap-1.5 text-xs font-semibold text-wine">
+          <Crown aria-hidden className="mt-px size-3.5 shrink-0 text-gold" />
+          Membership visit: the Saathi must not collect money
+        </p>
+      )}
+      {row.extraHoursRequested && (row.status === 'assigned' || row.status === 'started') && (
+        <ExtraTimeRequest row={row} busy={busy} run={run} />
+      )}
+      {more && (
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5">
+          {showMore && more}
+          <button
+            type="button"
+            aria-expanded={showMore}
+            onClick={() => setShowMore((value) => !value)}
+            className="inline-flex items-center gap-1 justify-self-start text-xs font-semibold text-rosewood transition-colors hover:text-burgundy"
+          >
+            {showMore ? 'Show less' : 'Show more'}
+            <ChevronDown aria-hidden className={`size-3.5 transition-transform ${showMore ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+      )}
 
       {open && editing && (
         <form noValidate onSubmit={onAssign} className="grid gap-2 rounded-xl bg-blush/70 p-3">
@@ -188,9 +178,17 @@ export function BookingAssignment({ row, saathis, linked, children }: {
                 {(s.services ?? []).includes(row.serviceId ?? '') ? ' ✓' : ''}
                 {s.id === row.saathiId ? (row.saathiChoice === 'chosen' ? ' (customer asked for)' : ' (suggested)') : ''}
                 {linked.has(s.id) ? '' : ' (no Saathi login: give access first)'}
+                {tooManyUnpaid(accounts.get(s.id)) ? ` ⚠ ${unpaidVisits(accounts.get(s.id))} unpaid visits` : ''}
               </option>
             ))}
           </select>
+          {chosenBehind && (
+            <p role="alert" className="flex items-start gap-1.5 text-xs font-semibold text-rosewood">
+              <TriangleAlert aria-hidden className="mt-px size-3.5 shrink-0" />
+              {chosen?.name} has not paid for {unpaidVisits(chosenAccount)} visits ({formatRupees(chosenAccount?.duePaise ?? 0)} due).
+              Collect it before giving them more visits, or pick another Saathi.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <input
               aria-label="Saathi WhatsApp number"
@@ -243,10 +241,13 @@ export function BookingAssignment({ row, saathis, linked, children }: {
             rel="noreferrer"
             title={membershipVisit ? 'WhatsApp the Saathi (tells them not to collect money)' : 'WhatsApp the Saathi the visit details'}
             aria-label={`WhatsApp ${row.assignedSaathiName ?? 'the Saathi'}`}
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-[#1f7a46]/10 px-3 text-xs font-semibold text-[#1f7a46] transition-colors hover:bg-[#1f7a46] hover:text-white"
+            className="relative grid size-9 shrink-0 place-items-center rounded-full bg-[#1f7a46] text-white transition-colors hover:bg-[#17603a]"
           >
             <MessageCircle aria-hidden className="size-4" />
-            Saathi
+            {/* Filled green with an S, to tell it from the customer's WhatsApp beside it. */}
+            <span aria-hidden className="absolute -right-1 -top-1 grid size-4 place-items-center rounded-full bg-white text-[0.5625rem] font-bold text-[#1f7a46] ring-1 ring-[#1f7a46]/40">
+              S
+            </span>
           </a>
         )}
         {row.location && (
@@ -267,9 +268,19 @@ export function BookingAssignment({ row, saathis, linked, children }: {
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className={`${mainAction} ${row.assignedSaathiId ? 'text-burgundy ring-1 ring-burgundy/20 hover:bg-burgundy/10' : 'bg-burgundy text-blush hover:bg-wine'}`}
+              title={row.assignedSaathiId ? 'Give the visit to another Saathi, or move its time' : undefined}
+              aria-label={row.assignedSaathiId ? 'Reassign: another Saathi or a new time' : undefined}
+              className={`${mainAction} ${row.assignedSaathiId ? 'px-2.5 text-burgundy ring-1 ring-burgundy/20 hover:bg-burgundy/10 sm:px-4' : 'bg-burgundy text-blush hover:bg-wine'}`}
             >
-              {row.assignedSaathiId ? 'Change' : 'Assign'}
+              {row.assignedSaathiId ? (
+                <>
+                  {/* Just the pencil on phones, so the buttons stay on one row. */}
+                  <Pencil aria-hidden className="size-4 sm:hidden" />
+                  <span className="hidden sm:inline">Reassign</span>
+                </>
+              ) : (
+                'Assign'
+              )}
             </button>
           )}
           {active && (

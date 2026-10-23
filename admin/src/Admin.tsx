@@ -14,7 +14,11 @@ import {
   Phone,
   Search,
   ShieldCheck,
+  Star,
+  TriangleAlert,
   UserRound,
+  UserRoundCheck,
+  Wallet,
   UserRoundPlus,
   type LucideIcon,
 } from 'lucide-react'
@@ -26,7 +30,6 @@ import { useAuth } from '../../main/src/auth/context'
 import { services } from '../../main/src/content/site'
 import {
   applicationStatuses,
-  bookingStatuses,
   publishSaathi,
   readFullAadhaar,
   setApplicationStatus,
@@ -40,7 +43,7 @@ import { auth } from '../../main/src/lib/firebase'
 import { idTypes } from '../../main/src/lib/identity'
 import { callLink, friendlyWhen, whatsappLink } from '../../main/src/lib/contact'
 import { hoursLabel } from '../../main/src/lib/pricing'
-import { DEFAULT_COMMISSION_PERCENT } from '../../main/src/lib/finance'
+import { DEFAULT_COMMISSION_PERCENT, formatRupees } from '../../main/src/lib/finance'
 import {
   removeAllAccess,
   watchAllSettlements,
@@ -49,8 +52,8 @@ import {
   type Settlement,
   type Staff,
 } from '../../main/src/lib/staff'
-import { watchAllMemberships, type Membership } from '../../main/src/lib/membership'
-import { accountsBySaathi } from './accounts'
+import { currentPlanOf, watchAllMemberships, type Membership } from '../../main/src/lib/membership'
+import { accountsBySaathi, tooManyUnpaid, unpaidVisits, type Accounts } from './accounts'
 import { Memberships } from './Memberships'
 import { BookingAssignment } from './BookingAssignment'
 import { Money } from './Money'
@@ -88,26 +91,31 @@ function useFeed<T>(name: 'bookings' | 'applications' | 'saathis'): Feed<T> {
   return { rows, error }
 }
 
-function Stat({ icon: Icon, label, value, highlight }: {
+/** One number at a glance; clicking it opens the list behind it. Highlighted only when not zero. */
+function Stat({ icon: Icon, label, value, highlight, onClick }: {
   icon: LucideIcon
   label: string
   value: number | null
   highlight?: boolean
+  onClick: () => void
 }) {
+  const strong = Boolean(highlight && value)
   return (
-    <div
-      className={`flex items-center gap-3 rounded-2xl px-4 py-3 ${
-        highlight ? 'bg-burgundy text-blush' : 'bg-white/90 ring-1 ring-gold/25'
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-left transition-[transform,box-shadow] duration-300 hover:-translate-y-0.5 hover:shadow-[0_14px_30px_-20px_rgb(58_17_25/0.6)] ${
+        strong ? 'bg-burgundy text-blush' : 'bg-white/90 ring-1 ring-gold/25'
       }`}
     >
-      <span className={`grid size-9 shrink-0 place-items-center rounded-xl ${highlight ? 'bg-blush/15 text-gold' : 'bg-burgundy/10 text-burgundy'}`}>
-        <Icon aria-hidden className="size-[1.125rem]" strokeWidth={1.8} />
+      <span className={`grid size-10 shrink-0 place-items-center rounded-xl ${strong ? 'bg-blush/15 text-gold' : 'bg-burgundy/10 text-burgundy'}`}>
+        <Icon aria-hidden className="size-5" strokeWidth={1.8} />
       </span>
-      <p className="flex items-baseline gap-2">
+      <span className="grid">
         <span className="text-2xl font-semibold leading-none">{value ?? '–'}</span>
-        <span className={`text-sm ${highlight ? 'text-blush/80' : 'text-ink-muted'}`}>{label}</span>
-      </p>
-    </div>
+        <span className={`mt-1 text-sm ${strong ? 'text-blush/80' : 'text-ink-muted'}`}>{label}</span>
+      </span>
+    </button>
   )
 }
 
@@ -196,33 +204,29 @@ const bookingStatusLabel: Record<string, string> = {
   cancelled: 'Cancelled',
 }
 
-function BookingCard({ row, saathis, linked }: {
+function BookingCard({ row, saathis, linked, accounts }: {
   row: Stored<Booking>
   saathis: Stored<Application>[]
   linked: Set<string>
+  accounts: Accounts
 }) {
   const asked = row.saathiName
     ? row.saathiChoice === 'random'
       ? `Suggested at random: ${row.saathiName}`
       : `Customer asked for ${row.saathiName}`
     : ''
+  const visitTime = row.scheduledAt ?? row.preferredStart
+  const paid = row.collection
   return (
     <Card
       name={row.name}
-      date={formatDate(row)}
+      date={`Booked ${formatDate(row)}`}
       status={
-        <span className="flex flex-wrap items-center justify-end gap-1.5">
-          {row.paidBy === 'membership' && (
-            <span title="Paid by the customer's membership: nothing to collect" className={`${pillClass} bg-gold/30 text-wine`}>
-              Membership
-            </span>
-          )}
-          <span
-            title={row.status === 'cancelled' && row.cancelledBy === 'customer' ? 'Cancelled by the customer' : undefined}
-            className={`${pillClass} ${statusTone[row.status] ?? ''}`}
-          >
-            {bookingStatusLabel[row.status] ?? row.status}
-          </span>
+        <span
+          title={row.status === 'cancelled' && row.cancelledBy === 'customer' ? 'Cancelled by the customer' : undefined}
+          className={`${pillClass} ${statusTone[row.status] ?? ''}`}
+        >
+          {bookingStatusLabel[row.status] ?? row.status}
         </span>
       }
     >
@@ -231,27 +235,70 @@ function BookingCard({ row, saathis, linked }: {
         row={row}
         saathis={saathis}
         linked={linked}
+        accounts={accounts}
+        more={
+          // On every card, so all cards look alike; an empty detail says so instead of vanishing.
+          <>
+            <Line icon={Wallet} label="Payment">
+              {!paid ? (
+                <span className="text-ink-muted">{row.status === 'cancelled' ? 'Cancelled, nothing paid' : 'Not paid yet'}</span>
+              ) : paid.method === 'membership' ? (
+                <>Nothing collected · we owe the Saathi {formatRupees(paid.saathiSharePaise)}</>
+              ) : (
+                <>
+                  <strong className="font-semibold">{formatRupees(paid.totalPaise)}</strong> by {paid.method === 'cash' ? 'cash' : 'UPI'} · our
+                  share {formatRupees(paid.companySharePaise)}
+                  {paid.extraPaise > 0 && ` · incl. ${formatRupees(paid.extraPaise)} extra (${paid.extraNote})`}
+                </>
+              )}
+            </Line>
+            <Line icon={Star} label="Customer's rating of the Saathi">
+              {row.saathiRating ? (
+                <>
+                  <strong className="text-gold">{'★'.repeat(row.saathiRating)}{'☆'.repeat(5 - row.saathiRating)}</strong>{' '}
+                  {row.saathiRating}/5{row.saathiRatingNote && `: “${row.saathiRatingNote}”`}
+                </>
+              ) : (
+                <span className="text-ink-muted">Not rated yet</span>
+              )}
+            </Line>
+            <Line icon={MessageSquareText} label="Message">
+              {row.message || <span className="text-ink-muted">No message</span>}
+            </Line>
+          </>
+        }
       >
+        {/* The four details every booking has, always in this order; they wrap rather than cut off. */}
         <Line icon={ClipboardList} label="Service">
           {[
             row.serviceName,
             row.hours ? hoursLabel(row.hours) : '',
-            row.paidBy === 'membership' ? 'Membership visit (free)' : row.planName && row.planPrice.split(' / ')[0],
+            row.paidBy === 'membership' ? 'Free (membership)' : row.planName && row.planPrice.split(' / ')[0],
           ]
             .filter(Boolean)
             .join(' · ')}
         </Line>
-        <Line icon={CalendarClock} label="Requested for">
-          {row.preferredStart && friendlyWhen(row.preferredStart.toDate())}
+        <Line icon={CalendarClock} label={row.scheduledAt ? 'Visit' : 'Requested for'}>
+          {visitTime && (
+            <>
+              {friendlyWhen(visitTime.toDate())}
+              {!row.scheduledAt && <span className="text-ink-muted"> (requested)</span>}
+            </>
+          )}
         </Line>
         <Line icon={MapPin} label="Address">
           {row.address || (row.location ? 'Location shared' : '')}
         </Line>
-        <Line icon={MessageSquareText} label="Message">
-          {row.message}
-        </Line>
-        <Line icon={UserRound} label="Saathi preference">
-          {!row.assignedSaathiName && asked}
+        <Line icon={row.assignedSaathiName ? UserRoundCheck : UserRound} label="Saathi">
+          {row.assignedSaathiName ? (
+            <>
+              <strong className="font-semibold">{row.assignedSaathiName}</strong> · {row.assignedSaathiPhone}
+            </>
+          ) : row.status === 'new' ? (
+            <span className="text-ink-muted">Not assigned yet{asked && ` · ${asked}`}</span>
+          ) : (
+            ''
+          )}
         </Line>
       </BookingAssignment>
     </Card>
@@ -417,24 +464,31 @@ function Notice({ children }: { children: ReactNode }) {
 }
 
 /** Search box, status chips and the filtered list for one collection. */
-function Listing<T extends { name: string; status: string }>({ feed, statuses, emptyText, searchText, render }: {
+function Listing<T extends { name: string; status: string }>({ feed, statuses, emptyText, searchText, render, initialStatus = 'all' }: {
   feed: Feed<T>
+  /** In the order to show them: what needs doing first. */
   statuses: readonly string[]
   emptyText: string
   searchText: (row: Stored<T>) => string
   render: (row: Stored<T>) => ReactNode
+  /** The status chip selected at first, e.g. from a number at the top of the page. */
+  initialStatus?: string
 }) {
-  const [status, setStatusFilter] = useState('all')
+  const [status, setStatusFilter] = useState(initialStatus)
   const [term, setTerm] = useState('')
 
   const visible = useMemo(() => {
     const needle = term.trim().toLowerCase()
-    return (feed.rows ?? []).filter(
-      (row) =>
-        (status === 'all' || row.status === status) &&
-        (!needle || searchText(row).toLowerCase().includes(needle)),
-    )
-  }, [feed.rows, status, term, searchText])
+    const rank = (row: Stored<T>) => (statuses.includes(row.status) ? statuses.indexOf(row.status) : statuses.length)
+    return (feed.rows ?? [])
+      .filter(
+        (row) =>
+          (status === 'all' || row.status === status) &&
+          (!needle || searchText(row).toLowerCase().includes(needle)),
+      )
+      // Just-created rows have no server time yet; they count as newest.
+      .sort((a, b) => rank(a) - rank(b) || (b.createdAt?.toMillis() ?? Infinity) - (a.createdAt?.toMillis() ?? Infinity))
+  }, [feed.rows, status, term, searchText, statuses])
 
   if (feed.error) return <Notice>Could not load: {feed.error}</Notice>
   if (!feed.rows) return <Notice>Loading…</Notice>
@@ -488,8 +542,18 @@ const bookingSearch = (row: Stored<Booking>) =>
   `${row.name} ${row.phone} ${row.serviceName ?? ''} ${row.saathiName ?? ''} ${row.assignedSaathiName ?? ''} ${row.planName} ${row.address}`
 const applicationSearch = (row: Stored<Application>) => `${row.name} ${row.mobile} ${row.email ?? ''} ${row.area} ${row.languages}`
 
+type Feeds = {
+  bookings: Feed<Booking>
+  applications: Feed<Application>
+  saathis: Feed<Saathi>
+  staff: Feed<Staff>
+  settlements: Feed<Settlement>
+  memberships: Feed<Membership>
+  percent: number
+}
+
+/** Everything the dashboard shows, live from Firestore while the page is open. */
 function Dashboard() {
-  const [tab, setTab] = useState<Tab>('bookings')
   const bookings = useFeed<Booking>('bookings')
   const applications = useFeed<Application>('applications')
   const saathis = useFeed<Saathi>('saathis')
@@ -498,6 +562,21 @@ function Dashboard() {
   const memberships = useLive<Membership>(watchAllMemberships)
   const [percent, setPercent] = useState(DEFAULT_COMMISSION_PERCENT)
   useEffect(() => watchCommissionPercent(setPercent, () => undefined), [])
+  return <DashboardView {...{ bookings, applications, saathis, staff, settlements, memberships, percent }} />
+}
+
+/** Bookings in the order they need attention: waiting for a Saathi first, finished last. */
+const bookingOrder = ['new', 'started', 'assigned', 'completed', 'cancelled'] as const
+const applicationOrder = ['pending', 'verified', 'rejected'] as const
+
+const greeting = (hour: number) => (hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening')
+
+function DashboardView({ bookings, applications, saathis, staff, settlements, memberships, percent }: Feeds) {
+  // The open section, and the status chip a number at the top asked for.
+  const [view, setView] = useState<{ tab: Tab; status: string }>({ tab: 'bookings', status: 'all' })
+  const tab = view.tab
+  const setTab = (next: Tab) => setView({ tab: next, status: 'all' })
+  const [now] = useState(() => new Date())
 
   const verified = useMemo(() => (applications.rows ?? []).filter((row) => row.status === 'verified'), [applications.rows])
   const linked = useMemo(
@@ -509,9 +588,9 @@ function Dashboard() {
     () => accountsBySaathi(applications.rows ?? [], bookings.rows ?? [], settlements.rows ?? []),
     [applications.rows, bookings.rows, settlements.rows],
   )
-  const owing = [...accounts.values()].filter((account) => account.duePaise > 0).length
+  const overdue = [...accounts.values()].filter((account) => account.overdue).length
   const renderBooking = (row: Stored<Booking>) => (
-    <BookingCard key={row.id} row={row} saathis={verified} linked={linked} />
+    <BookingCard key={row.id} row={row} saathis={verified} linked={linked} accounts={accounts} />
   )
   const renderApplication = (row: Stored<Application>) => (
     <ApplicationCard key={row.id} row={row} saathi={saathis.rows?.find((saathi) => saathi.id === row.id)} />
@@ -519,39 +598,104 @@ function Dashboard() {
   const count = <T extends { status: string }>(feed: Feed<T>, status?: string) =>
     feed.rows ? feed.rows.filter((row) => !status || row.status === status).length : null
 
-  const tabs: { id: Tab; label: string; total: number | null }[] = [
-    { id: 'bookings', label: 'Bookings', total: count(bookings) },
-    { id: 'applications', label: 'Applications', total: count(applications) },
-    { id: 'memberships', label: 'Memberships', total: memberships.rows ? memberships.rows.filter((row) => row.status === 'active').length : null },
-    { id: 'team', label: 'Saathis', total: verified.length },
-    { id: 'money', label: 'Money', total: owing || null },
+  // No counts on the tabs: just a dot when something there needs doing, and what it is.
+  const renamedPlans = (memberships.rows ?? []).filter((row) => {
+    const plan = currentPlanOf(row)
+    return plan.id !== row.planId || plan.visitsPerMonth !== row.visitsPerMonth
+  }).length
+  const withoutLogin = verified.filter((saathi) => !linked.has(saathi.id)).length
+  // Saathis with more than UNPAID_VISIT_LIMIT visits unpaid: named at the top and flagged when assigning.
+  const behind = verified.filter((saathi) => tooManyUnpaid(accounts.get(saathi.id)))
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+  const tabs: { id: Tab; label: string; attention: string }[] = [
+    { id: 'bookings', label: 'Bookings', attention: count(bookings, 'new') ? plural(count(bookings, 'new')!, 'new booking', 'new bookings') : '' },
+    { id: 'applications', label: 'Applications', attention: count(applications, 'pending') ? plural(count(applications, 'pending')!, 'application to check', 'applications to check') : '' },
+    { id: 'memberships', label: 'Memberships', attention: renamedPlans ? plural(renamedPlans, 'membership on an old plan', 'memberships on an old plan') : '' },
+    {
+      id: 'team',
+      label: 'Saathis',
+      attention: [
+        behind.length ? plural(behind.length, 'Saathi behind on payments', 'Saathis behind on payments') : '',
+        withoutLogin ? plural(withoutLogin, 'Saathi without a website login', 'Saathis without a website login') : '',
+      ]
+        .filter(Boolean)
+        .join(', '),
+    },
+    { id: 'money', label: 'Payments', attention: overdue ? plural(overdue, 'overdue payment', 'overdue payments') : '' },
   ]
+
+  const waiting = count(bookings, 'new')
+  const today = now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })
 
   return (
     <>
-      <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(min(100%,10rem),1fr))] gap-3">
-        <Stat icon={ClipboardList} label="new" value={count(bookings, 'new')} highlight />
-        <Stat icon={CalendarClock} label="to run" value={count(bookings, 'assigned')} />
-        <Stat icon={UserRoundPlus} label="to verify" value={count(applications, 'pending')} />
-        <Stat icon={ShieldCheck} label="Saathis" value={count(applications, 'verified')} />
+      <header className="mb-5">
+        <h1 className="text-3xl font-light tracking-tight">{greeting(now.getHours())}</h1>
+        <p className="mt-1 text-ink-muted">
+          {today}
+          {waiting === null ? '' : waiting ? ` · ${waiting} booking${waiting === 1 ? '' : 's'} waiting for a Saathi` : ' · nothing waiting'}
+        </p>
+      </header>
+
+      {behind.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setTab('team')}
+          className="mb-5 flex w-full items-start gap-3 rounded-2xl bg-rosewood/10 px-4 py-3 text-left ring-1 ring-rosewood/30 transition-colors hover:bg-rosewood/15"
+        >
+          <TriangleAlert aria-hidden className="mt-0.5 size-5 shrink-0 text-rosewood" />
+          <span className="grow text-sm">
+            <strong className="font-semibold text-wine">Not paying: </strong>
+            {behind
+              .map((saathi) => {
+                const account = accounts.get(saathi.id)
+                return `${saathi.name} (${unpaidVisits(account)} visits unpaid, ${formatRupees(account?.duePaise ?? 0)})`
+              })
+              .join(' · ')}
+            . Collect before giving them more visits.
+          </span>
+          <span className="shrink-0 self-center text-sm font-semibold text-wine">Saathis →</span>
+        </button>
+      )}
+
+      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Stat icon={ClipboardList} label="New bookings" value={waiting} highlight onClick={() => setView({ tab: 'bookings', status: 'new' })} />
+        <Stat icon={CalendarClock} label="Visits to run" value={count(bookings, 'assigned')} onClick={() => setView({ tab: 'bookings', status: 'assigned' })} />
+        <Stat
+          icon={UserRoundPlus}
+          label="Applications to check"
+          value={count(applications, 'pending')}
+          highlight
+          onClick={() => setView({ tab: 'applications', status: 'pending' })}
+        />
+        <Stat icon={ShieldCheck} label="Saathis" value={applications.rows ? verified.length : null} onClick={() => setTab('team')} />
       </div>
 
-      <div role="tablist" aria-label="Admin sections" className="mb-4 inline-flex flex-wrap gap-1 rounded-full bg-burgundy/10 p-1">
-        {tabs.map(({ id, label, total }) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={tab === id}
-            onClick={() => setTab(id)}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors duration-300 ${
-              tab === id ? 'bg-burgundy text-blush' : 'text-burgundy'
-            }`}
-          >
-            {label}
-            {total !== null && <span className="ml-2 opacity-70">{total}</span>}
-          </button>
-        ))}
+      {/* Pinned under the admin bar, so switching sections never needs a scroll back up. */}
+      <div className="sticky top-16 z-30 -mx-2 mb-5 px-2 py-2 backdrop-blur-md">
+        <div role="tablist" aria-label="Admin sections" className="flex gap-1 overflow-x-auto rounded-2xl [scrollbar-width:none] bg-white/85 p-1 shadow-[0_10px_30px_-24px_rgb(58_17_25/0.6)] ring-1 ring-gold/25">
+          {tabs.map(({ id, label, attention }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              onClick={() => setTab(id)}
+              title={attention || undefined}
+              className={`flex shrink-0 grow items-center justify-center gap-2 whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors duration-300 ${
+                tab === id ? 'bg-burgundy text-blush' : 'text-burgundy hover:bg-burgundy/[0.06]'
+              }`}
+            >
+              {label}
+              {attention && (
+                <>
+                  <span aria-hidden className={`size-2 rounded-full ${tab === id ? 'bg-gold' : 'bg-rosewood'}`} />
+                  <span className="sr-only">: {attention}</span>
+                </>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
 
       {tab === 'memberships' ? (
@@ -582,16 +726,20 @@ function Dashboard() {
         )
       ) : tab === 'bookings' ? (
         <Listing
+          key={`bookings-${view.status}`}
           feed={bookings}
-          statuses={bookingStatuses}
+          statuses={bookingOrder}
+          initialStatus={view.status}
           emptyText="No customer requests yet."
           searchText={bookingSearch}
           render={renderBooking}
         />
       ) : (
         <Listing
+          key={`applications-${view.status}`}
           feed={applications}
-          statuses={applicationStatuses}
+          statuses={applicationOrder}
+          initialStatus={view.status}
           emptyText="No Saathi applications yet."
           searchText={applicationSearch}
           render={renderApplication}

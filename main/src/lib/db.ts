@@ -71,6 +71,10 @@ export type Booking = {
   collection?: Collection
   /** Set when the customer's monthly membership pays for the visit, so nothing is collected. */
   paidBy?: 'membership'
+  /** The customer's rating of the Saathi after a completed visit: 1 to 5 stars and a note. */
+  saathiRating?: number
+  saathiRatingNote?: string
+  saathiRatedAt?: Timestamp
 }
 
 export const applicationStatuses = ['pending', 'verified', 'rejected'] as const
@@ -264,6 +268,44 @@ export function cancelBooking(booking: Stored<Booking>, by: 'customer' | 'admin'
     if (by === 'admin') batch.update(membership, used, increment(-1), 'lastBookingId', booking.id, 'updatedAt', serverTimestamp())
     else batch.update(membership, used, increment(-1), 'lastBookingId', booking.id)
   }
+  return batch.commit()
+}
+
+/** One customer's rating of the Saathi on one completed visit, at saathiRatings/{booking id}. */
+export type SaathiRating = {
+  bookingId: string
+  saathiId: string
+  saathiName: string
+  uid: string
+  customerName: string
+  serviceName: string
+  rating: number
+  note: string
+}
+
+/**
+ * The customer rates the Saathi who completed their visit, once (a rating cannot be changed).
+ * Saved twice in one write: on the booking, and in saathiRatings, where every rating can be
+ * looked through.
+ */
+export function rateSaathi(booking: Stored<Booking>, rating: number, note: string) {
+  const batch = writeBatch(database())
+  batch.update(doc(database(), 'bookings', booking.id), {
+    saathiRating: rating,
+    saathiRatingNote: note.trim(),
+    saathiRatedAt: serverTimestamp(),
+  })
+  batch.set(doc(database(), 'saathiRatings', booking.id), {
+    bookingId: booking.id,
+    saathiId: booking.assignedSaathiId ?? '',
+    saathiName: booking.assignedSaathiName ?? '',
+    uid: booking.uid,
+    customerName: booking.name,
+    serviceName: booking.serviceName ?? '',
+    rating,
+    note: note.trim(),
+    createdAt: serverTimestamp(),
+  } satisfies SaathiRating & { createdAt: unknown })
   return batch.commit()
 }
 

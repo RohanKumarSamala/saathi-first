@@ -62,7 +62,7 @@ const completedVisit = (id: string, saathiId: string, companySharePaise: number)
 
 describe('money helpers', () => {
   test('plan prices are read in paise', () => {
-    assert.deepEqual(planPaise, { property: 9900, quick: 24900, care: 49900, day: 99900, extended: 129900 })
+    assert.deepEqual(planPaise, { property: 19900, quick: 39900, care: 69900, day: 99900, extended: 129900, emergency: 99900, 'event-temple': 49900 })
   })
   test('typed amounts become exact paise', () => {
     assert.equal(rupeesToPaise('150'), 15000)
@@ -82,8 +82,8 @@ describe('money helpers', () => {
   test('a collection always adds up', () => {
     const c = buildCollection({ planId: 'care', extraPaise: 10000, extraNote: ' One extra hour ', method: 'cash', commissionPercent: 20 })
     assert.deepEqual(c, {
-      billPaise: 49900, extraPaise: 10000, extraNote: 'One extra hour', totalPaise: 59900,
-      method: 'cash', commissionPercent: 20, companySharePaise: 11980, saathiSharePaise: 47920,
+      billPaise: 69900, extraPaise: 10000, extraNote: 'One extra hour', totalPaise: 79900,
+      method: 'cash', commissionPercent: 20, companySharePaise: 15980, saathiSharePaise: 63920,
     })
     assert.equal(c.companySharePaise + c.saathiSharePaise, c.totalPaise)
   })

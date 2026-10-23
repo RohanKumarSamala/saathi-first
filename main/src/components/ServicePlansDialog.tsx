@@ -108,7 +108,13 @@ export function ServicePlansDialog({ service, onClose }: { service: Service; onC
                 action={
                   // The booking form opens with this plan already chosen.
                   <Link
-                    to={plan.hours ? `/contact/${service.id}?plan=${plan.id}` : `/contact/${service.id}`}
+                    to={
+                      plan.onlyFor
+                        ? `/contact/${plan.onlyFor}`
+                        : plan.hours
+                          ? `/contact/${service.id}?plan=${plan.id}`
+                          : `/contact/${service.id}`
+                    }
                     onClick={onClose}
                     className={actionClass}
                   >

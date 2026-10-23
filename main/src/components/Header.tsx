@@ -5,6 +5,7 @@ import logo from '../assets/logo/logo-horizontal-light.svg'
 import { useAuth } from '../auth/context'
 import { navLinks, services } from '../content/site'
 import { useMembership } from '../hooks/useMembership'
+import { currentPlanOf } from '../lib/membership'
 
 const linkClass =
   'relative z-10 whitespace-nowrap rounded-xl px-3.5 py-2 text-[0.8125rem] font-semibold uppercase leading-6 tracking-[0.04em] text-blush/75 transition-colors duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] hover:text-blush aria-[current=page]:text-blush 2xl:px-4'
@@ -115,11 +116,19 @@ function useActiveMembership() {
   const membership = useMembership()
   const [now] = useState(() => new Date())
   if (!membership || membership.status !== 'active' || membership.validUntil.toMillis() < now.getTime()) return null
-  return { planName: membership.planName }
+  const plan = currentPlanOf(membership)
+  return { planId: plan.id, planName: plan.name }
+}
+
+/** Each plan's badge colours: silver for Silver Care, gold for Golden Care. */
+const badgeTones: Record<string, string> = {
+  'silver-care': 'bg-[#c9ced6]/20 text-[#dfe3e8] ring-[#c9ced6]/50 hover:bg-[#c9ced6]/30',
+  'golden-care': 'bg-gold/20 text-gold ring-gold/40 hover:bg-gold/30',
 }
 
 /**
- * Gold badge in the bar showing a member's plan, linking to My profile (where the visits left are).
+ * Badge in the bar showing a member's plan in its colour, linking to My profile (where the visits
+ * left are).
  */
 function MembershipBadge({ onClick }: { onClick?: () => void }) {
   const active = useActiveMembership()
@@ -130,7 +139,7 @@ function MembershipBadge({ onClick }: { onClick?: () => void }) {
       onClick={onClick}
       aria-label={`${active.planName} membership`}
       title={`${active.planName} membership`}
-      className="flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-gold/20 px-2.5 text-xs font-bold uppercase tracking-[0.04em] text-gold ring-1 ring-gold/40 transition-colors hover:bg-gold/30"
+      className={`flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-xs font-bold uppercase tracking-[0.04em] ring-1 transition-colors ${badgeTones[active.planId] ?? badgeTones['golden-care']}`}
     >
       <Crown aria-hidden className="size-4" />
       {/* The name shows where the bar has room: not on small phones, nor on laptop-width desktop bars. */}
